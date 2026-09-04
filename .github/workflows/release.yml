@@ -1,0 +1,113 @@
+name: Release packages
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install browser package dependencies
+        run: npm ci --prefix packages/darkws
+
+      - name: Validate release version
+        id: version
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          GITHUB_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$') {
+              throw "Release tag must be SemVer prefixed with v: $env:RELEASE_TAG"
+          }
+          $version = $env:RELEASE_TAG.Substring(1)
+          ./scripts/check-version.ps1 -ExpectedVersion $version
+          $isPrerelease = $version.Contains('-')
+          if ($isPrerelease -ne [bool]::Parse($env:GITHUB_PRERELEASE)) {
+              throw "GitHub prerelease flag does not match version $version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "npm_tag=$(if ($isPrerelease) { 'next' } else { 'latest' })" >> $env:GITHUB_OUTPUT
+
+      - name: Run tests and coverage gates
+        shell: pwsh
+        run: ./scripts/test-coverage.ps1
+
+      - name: Pack packages
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifacts | Out-Null
+          dotnet pack DarkBoy.DarkWS/DarkBoy.DarkWS.csproj -c Release --no-restore -o artifacts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet pack DarkBoy.DarkWS.Redis/DarkBoy.DarkWS.Redis.csproj -c Release --no-restore -o artifacts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Push-Location packages/darkws
+          try {
+              npm pack --pack-destination ../../artifacts
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+              Pop-Location
+          }
+
+      - name: Authenticate to NuGet.org
+        uses: NuGet/login@v1
+        id: nuget
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Publish NuGet packages
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }}
+        run: |
+          Get-ChildItem artifacts -Filter *.nupkg | ForEach-Object {
+              dotnet nuget push $_.FullName `
+                  --api-key $env:NUGET_API_KEY `
+                  --source https://api.nuget.org/v3/index.json `
+                  --skip-duplicate
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Publish npm package
+        working-directory: packages/darkws
+        shell: pwsh
+        env:
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+          NPM_TAG: ${{ steps.version.outputs.npm_tag }}
+        run: |
+          $published = npm view "@darkboy/darkws@$env:PACKAGE_VERSION" version 2>$null
+          if ($LASTEXITCODE -eq 0 -and $published.Trim() -eq $env:PACKAGE_VERSION) {
+              Write-Host "@darkboy/darkws@$env:PACKAGE_VERSION is already published"
+              exit 0
+          }
+          npm publish --tag $env:NPM_TAG

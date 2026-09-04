@@ -3,13 +3,14 @@
   <PropertyGroup>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <FileVersion>1.2.0</FileVersion>
-    <AssemblyVersion>1.2.0</AssemblyVersion>
-    <PackageVersion>1.2.0</PackageVersion>
     <Title>DarkBoy.DarkWS</Title>
     <Authors>DarkBoy</Authors>
     <Copyright>DarkBoy</Copyright>
     <Description>Websocket server DarkWs protocol for ASP.NET</Description>
+    <PackageProjectUrl>https://github.com/Bobsans/DarkWS</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Bobsans/DarkWS.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>websocket;aspnetcore;realtime;rpc</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>readme.md</PackageReadmeFile>
     <LangVersion>default</LangVersion>

@@ -39,6 +39,9 @@ try {
 
     npm --prefix packages/darkws run test:coverage
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    npm --prefix packages/darkws run build
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
     Pop-Location
 }

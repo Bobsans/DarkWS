@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: packages/darkws/package-lock.json
+
+      - name: Install browser package dependencies
+        run: npm ci --prefix packages/darkws
+
+      - name: Verify package versions
+        shell: pwsh
+        run: ./scripts/test-version.ps1
+
+      - name: Run tests and coverage gates
+        shell: pwsh
+        run: ./scripts/test-coverage.ps1

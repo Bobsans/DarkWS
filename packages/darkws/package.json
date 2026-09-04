@@ -2,10 +2,30 @@
   "name": "@darkboy/darkws",
   "version": "1.0.0",
   "description": "Dependency-free DarkWS client for browsers",
+  "keywords": [
+    "websocket",
+    "realtime",
+    "rpc",
+    "typescript"
+  ],
+  "homepage": "https://github.com/Bobsans/DarkWS#readme",
+  "bugs": {
+    "url": "https://github.com/Bobsans/DarkWS/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Bobsans/DarkWS.git",
+    "directory": "packages/darkws"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "type": "module",
   "license": "MIT",
   "files": [
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "main": "./dist/index.js",
