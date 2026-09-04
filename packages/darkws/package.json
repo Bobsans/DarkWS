@@ -1,0 +1,29 @@
+{
+  "name": "@darkboy/darkws",
+  "version": "1.0.0",
+  "description": "Dependency-free DarkWS client for browsers",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "4.1.11",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  }
+}

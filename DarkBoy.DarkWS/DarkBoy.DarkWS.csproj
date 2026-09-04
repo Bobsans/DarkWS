@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <FileVersion>1.2.0</FileVersion>
+    <AssemblyVersion>1.2.0</AssemblyVersion>
+    <PackageVersion>1.2.0</PackageVersion>
+    <Title>DarkBoy.DarkWS</Title>
+    <Authors>DarkBoy</Authors>
+    <Copyright>DarkBoy</Copyright>
+    <Description>Websocket server DarkWs protocol for ASP.NET</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>readme.md</PackageReadmeFile>
+    <LangVersion>default</LangVersion>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="readme.md" Pack="true" PackagePath="\"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App"/>
+  </ItemGroup>
+</Project>

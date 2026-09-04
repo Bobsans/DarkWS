@@ -1,0 +1,10 @@
+.idea
+
+bin/
+obj/
+*.DotSettings.user
+
+node_modules/
+dist/
+*.tgz
+coverage/
