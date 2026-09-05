@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Title>DarkWS.Redis</Title>
+    <Authors>Bobsans</Authors>
+    <Copyright>Bobsans</Copyright>
+    <Description>Redis backplane for DarkWS</Description>
+    <PackageProjectUrl>https://github.com/Bobsans/DarkWS</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Bobsans/DarkWS.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>websocket;aspnetcore;redis;backplane;realtime</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>readme.md</PackageReadmeFile>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="readme.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="StackExchange.Redis" Version="2.13.17" />
+    <ProjectReference Include="..\DarkWS\DarkWS.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+</Project>

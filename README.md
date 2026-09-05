@@ -3,9 +3,9 @@
 [![CI](https://github.com/Bobsans/DarkWS/actions/workflows/ci.yml/badge.svg)](https://github.com/Bobsans/DarkWS/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/badge/coverage-90%25%2B-brightgreen)](scripts/test-coverage.ps1)
 [![.NET](https://img.shields.io/badge/.NET-8%20%7C%209%20%7C%2010-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
-[![NuGet](https://img.shields.io/nuget/v/DarkBoy.DarkWS.svg?label=NuGet)](https://www.nuget.org/packages/DarkBoy.DarkWS)
-[![NuGet Redis](https://img.shields.io/nuget/v/DarkBoy.DarkWS.Redis.svg?label=NuGet%20Redis)](https://www.nuget.org/packages/DarkBoy.DarkWS.Redis)
-[![npm](https://img.shields.io/npm/v/%40darkboy%2Fdarkws.svg?label=npm)](https://www.npmjs.com/package/@darkboy/darkws)
+[![NuGet](https://img.shields.io/nuget/v/DarkWS.svg?label=NuGet)](https://www.nuget.org/packages/DarkWS)
+[![NuGet Redis](https://img.shields.io/nuget/v/DarkWS.Redis.svg?label=NuGet%20Redis)](https://www.nuget.org/packages/DarkWS.Redis)
+[![npm](https://img.shields.io/npm/v/darkws.svg?label=npm)](https://www.npmjs.com/package/darkws)
 [![License](https://img.shields.io/github/license/Bobsans/DarkWS)](LICENSE)
 
 DarkWS is a small request/response protocol over WebSockets for ASP.NET Core
@@ -17,9 +17,9 @@ backplane.
 
 | Package | Purpose |
 | --- | --- |
-| [`DarkBoy.DarkWS`](DarkBoy.DarkWS/) | ASP.NET Core server with an in-memory backplane |
-| [`DarkBoy.DarkWS.Redis`](DarkBoy.DarkWS.Redis/) | Redis backplane for multi-instance deployments |
-| [`@darkboy/darkws`](packages/darkws/) | Dependency-free ESM browser client with TypeScript declarations |
+| [`DarkWS`](DarkWS/) | ASP.NET Core server with an in-memory backplane |
+| [`DarkWS.Redis`](DarkWS.Redis/) | Redis backplane for multi-instance deployments |
+| [`darkws`](packages/darkws/) | Dependency-free ESM browser client with TypeScript declarations |
 
 The .NET packages target .NET 8, 9, and 10. The browser package targets modern
 browsers with native `WebSocket` and `crypto.randomUUID()` support.
@@ -42,19 +42,19 @@ browsers with native `WebSocket` and `crypto.randomUUID()` support.
 Server:
 
 ```bash
-dotnet add package DarkBoy.DarkWS
+dotnet add package DarkWS
 ```
 
 Optional Redis backplane:
 
 ```bash
-dotnet add package DarkBoy.DarkWS.Redis
+dotnet add package DarkWS.Redis
 ```
 
 Browser client:
 
 ```bash
-npm install @darkboy/darkws
+npm install darkws
 ```
 
 ## ASP.NET Core quick start
@@ -62,7 +62,7 @@ npm install @darkboy/darkws
 Register DarkWS and the assembly containing handlers:
 
 ```csharp
-using DarkBoy.DarkWS;
+using DarkWS;
 
 builder.Services
     .AddDarkWs()
@@ -81,7 +81,7 @@ Handlers require authentication by default. Mark a handler or action with
 `[AllowAnonymous]` when it must be public.
 
 ```csharp
-using DarkBoy.DarkWS;
+using DarkWS;
 using Microsoft.AspNetCore.Authorization;
 
 [Handler("system"), AllowAnonymous]
@@ -99,7 +99,7 @@ Applications can attach immutable domain data to each connection:
 
 ```csharp
 using System.Security.Claims;
-using DarkBoy.DarkWS.Abstractions;
+using DarkWS.Abstractions;
 
 public sealed record AppSession(
     string Id,
@@ -153,7 +153,7 @@ The core package uses the in-memory backplane by default. Redis requires an
 existing `IConnectionMultiplexer` and an explicit channel name:
 
 ```csharp
-using DarkBoy.DarkWS.Redis;
+using DarkWS.Redis;
 using StackExchange.Redis;
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(redis);
@@ -166,7 +166,7 @@ change when the backplane changes.
 ## Browser client
 
 ```ts
-import DarkWs from "@darkboy/darkws";
+import DarkWs from "darkws";
 
 const client = new DarkWs({
   secure: location.protocol === "https:",
@@ -227,12 +227,12 @@ All three packages use one SemVer version. Update every manifest and the npm
 lockfile with one command:
 
 ```powershell
-pwsh ./scripts/set-version.ps1 1.1.0
+pwsh ./scripts/set-version.ps1 2.1.0
 ```
 
 CI runs `scripts/test-version.ps1` and rejects inconsistent package versions.
 Release tags must use the matching `vX.Y.Z` form, including an optional SemVer
-prerelease suffix such as `v1.1.0-rc.1`.
+prerelease suffix such as `v2.1.0-rc.1`.
 
 ## Publishing
 
@@ -245,10 +245,9 @@ One-time registry setup:
 2. Add repository variable `NUGET_USER` with the NuGet.org profile name.
 3. On NuGet.org, add a trusted publishing policy for owner `Bobsans`, repository
    `DarkWS`, workflow `release.yml`, and environment `release`.
-4. Publish `@darkboy/darkws@1.0.0` publicly once, then configure its npm
-   trusted publisher for owner `Bobsans`, repository `DarkWS`, workflow
-   `release.yml`, environment `release`, with direct `npm publish` allowed.
-   The first `v1.0.0` workflow run detects and skips that existing npm version.
+4. On the existing `darkws` npm package, configure its trusted publisher for
+   owner `Bobsans`, repository `DarkWS`, workflow `release.yml`, environment
+   `release`, with direct `npm publish` allowed.
 
 For each release:
 

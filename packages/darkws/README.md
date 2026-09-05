@@ -1,9 +1,9 @@
-# @darkboy/darkws
+# darkws
 
 Dependency-free DarkWS request/response client for browsers.
 
 ```ts
-import DarkWs from "@darkboy/darkws";
+import DarkWs from "darkws";
 
 const client = new DarkWs({
   secure: location.protocol === "https:",

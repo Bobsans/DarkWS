@@ -1,6 +1,6 @@
 {
-  "name": "@darkboy/darkws",
-  "version": "1.0.0",
+  "name": "darkws",
+  "version": "2.0.0",
   "description": "Dependency-free DarkWS client for browsers",
   "keywords": [
     "websocket",

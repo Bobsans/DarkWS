@@ -67,9 +67,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path artifacts | Out-Null
-          dotnet pack DarkBoy.DarkWS/DarkBoy.DarkWS.csproj -c Release --no-restore -o artifacts
+          dotnet pack DarkWS/DarkWS.csproj -c Release --no-restore -o artifacts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet pack DarkBoy.DarkWS.Redis/DarkBoy.DarkWS.Redis.csproj -c Release --no-restore -o artifacts
+          dotnet pack DarkWS.Redis/DarkWS.Redis.csproj -c Release --no-restore -o artifacts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Push-Location packages/darkws
           try {
@@ -105,9 +105,9 @@ jobs:
           PACKAGE_VERSION: ${{ steps.version.outputs.version }}
           NPM_TAG: ${{ steps.version.outputs.npm_tag }}
         run: |
-          $published = npm view "@darkboy/darkws@$env:PACKAGE_VERSION" version 2>$null
+          $published = npm view "darkws@$env:PACKAGE_VERSION" version 2>$null
           if ($LASTEXITCODE -eq 0 -and $published.Trim() -eq $env:PACKAGE_VERSION) {
-              Write-Host "@darkboy/darkws@$env:PACKAGE_VERSION is already published"
+              Write-Host "darkws@$env:PACKAGE_VERSION is already published"
               exit 0
           }
           npm publish --tag $env:NPM_TAG

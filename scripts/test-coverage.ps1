@@ -8,20 +8,20 @@ try {
     dotnet tool restore
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    dotnet restore DarkBoy.DarkWS.sln
+    dotnet restore DarkWS.sln
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    dotnet build DarkBoy.DarkWS.sln --no-restore
+    dotnet build DarkWS.sln --no-restore
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     dotnet tool run dotnet-coverage collect `
-        "dotnet test DarkBoy.DarkWS.sln --no-build" `
+        "dotnet test DarkWS.sln --no-build" `
         -f cobertura `
         -o $coveragePath
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     [xml]$coverage = Get-Content -Raw $coveragePath
-    foreach ($packageName in "DarkBoy.DarkWS", "DarkBoy.DarkWS.Redis") {
+    foreach ($packageName in "DarkWS", "DarkWS.Redis") {
         $package = $coverage.coverage.packages.package |
             Where-Object name -EQ $packageName |
             Select-Object -First 1
