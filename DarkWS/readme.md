@@ -35,3 +35,15 @@ public sealed class MessageHandler : HandlerBase<AppSession> {
 Handlers require an authenticated session by default. Add `[AllowAnonymous]`
 to public handlers or actions. Register `AddSession` and call `UseSession`
 before `MapDarkWs` when handlers need ASP.NET `ISession`.
+
+## Incoming message limit
+
+`DarkWsOptions.MaxMessageSizeBytes` limits a complete incoming message in bytes,
+including all fragments, before JSON parsing. The default is 1 MiB (1048576 bytes);
+values must be positive. Messages exactly at the limit are accepted. Exceeding
+the limit closes the connection with status 1009 (Message Too Big), without
+dispatching the partial message. This also applies to authentication messages.
+
+```csharp
+services.AddDarkWs(options => options.MaxMessageSizeBytes = 256 * 1024);
+```

@@ -3,6 +3,8 @@ using System.Text.Json;
 namespace DarkWS;
 
 public sealed class DarkWsOptions {
+    public const int DefaultMaxMessageSizeBytes = 1024 * 1024;
+    public int MaxMessageSizeBytes { get; set; } = DefaultMaxMessageSizeBytes;
     public JsonSerializerOptions JsonOptions { get; set; } = new(JsonSerializerDefaults.Web);
     public TimeSpan KeepAliveInterval { get; set; } = TimeSpan.FromHours(1);
     public TimeSpan BroadcastSendTimeout { get; set; } = TimeSpan.FromSeconds(10);

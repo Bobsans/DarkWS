@@ -16,6 +16,7 @@ public static class Configuration {
     ) {
         var options = new DarkWsOptions();
         configure?.Invoke(options);
+        ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxMessageSizeBytes, 1);
         var registry = new DarkWsActionRegistry();
 
         services.AddSingleton(Options.Create(options));
@@ -63,7 +64,7 @@ public static class Configuration {
             var socket = await context.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext {
                 KeepAliveInterval = options.KeepAliveInterval
             });
-            var connection = new WebSocketConnection(socket, context, session);
+            var connection = new WebSocketConnection(socket, context, session, options.MaxMessageSizeBytes);
             await context.RequestServices.GetRequiredService<WebSocketHandler>()
                 .AcceptAsync(connection, cancellation.Token);
         });

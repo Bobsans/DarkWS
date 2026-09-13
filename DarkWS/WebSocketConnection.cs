@@ -8,9 +8,16 @@ namespace DarkWS;
 public sealed class WebSocketConnection(
     WebSocket webSocket,
     HttpContext context,
-    IDarkWsSession? session
+    IDarkWsSession? session,
+    int maxMessageSizeBytes
 ) : IWebSocketConnection {
+    private readonly int _maxMessageSizeBytes = maxMessageSizeBytes > 0
+        ? maxMessageSizeBytes
+        : throw new ArgumentOutOfRangeException(nameof(maxMessageSizeBytes));
     private readonly SemaphoreSlim _sendLock = new(1, 1);
+
+    public WebSocketConnection(WebSocket webSocket, HttpContext context, IDarkWsSession? session)
+        : this(webSocket, context, session, DarkWsOptions.DefaultMaxMessageSizeBytes) { }
 
     public string Id { get; } = Guid.NewGuid().ToString("N");
     public HttpContext HttpContext { get; } = context;
@@ -30,6 +37,21 @@ public sealed class WebSocketConnection(
         try {
             do {
                 result = await WebSocket.ReceiveAsync(buffer, cancellationToken);
+                if (result.MessageType == WebSocketMessageType.Close) {
+                    return new ReceivedMessage(result, Array.Empty<byte>());
+                }
+                if (stream.Length + result.Count > _maxMessageSizeBytes) {
+                    const string reason = "Message size limit exceeded";
+                    await _sendLock.WaitAsync(cancellationToken);
+                    try {
+                        await WebSocket.CloseOutputAsync(WebSocketCloseStatus.MessageTooBig, reason, cancellationToken);
+                    } finally {
+                        _sendLock.Release();
+                    }
+                    return new ReceivedMessage(new WebSocketReceiveResult(
+                        0, WebSocketMessageType.Close, true, WebSocketCloseStatus.MessageTooBig, reason
+                    ), Array.Empty<byte>());
+                }
                 await stream.WriteAsync(buffer.AsMemory(0, result.Count), cancellationToken);
             } while (!result.EndOfMessage);
         } finally {

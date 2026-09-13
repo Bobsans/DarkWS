@@ -12,6 +12,7 @@ public sealed class TestWebSocket : WebSocket {
     public ConcurrentQueue<byte[]> Sent { get; } = new();
     public TimeSpan SendDelay { get; set; }
     public int MaxConcurrentSends => _maxConcurrentSends;
+    public WebSocketCloseStatus? LastOutputCloseStatus { get; private set; }
     public bool WasAborted { get; private set; }
 
     public override WebSocketCloseStatus? CloseStatus => null;
@@ -30,6 +31,7 @@ public sealed class TestWebSocket : WebSocket {
     }
 
     public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken) {
+        LastOutputCloseStatus = closeStatus;
         _state = WebSocketState.CloseSent;
         return Task.CompletedTask;
     }
@@ -43,7 +45,7 @@ public sealed class TestWebSocket : WebSocket {
         receive.Data.AsSpan().CopyTo(buffer.AsSpan());
         return Task.FromResult(new WebSocketReceiveResult(
             receive.Data.Length,
-            WebSocketMessageType.Text,
+            receive.CloseStatus.HasValue ? WebSocketMessageType.Close : WebSocketMessageType.Text,
             receive.EndOfMessage,
             receive.CloseStatus,
             null
@@ -70,6 +72,10 @@ public sealed class TestWebSocket : WebSocket {
 
     public void EnqueueReceive(string data, bool endOfMessage = true) {
         _receives.Enqueue((System.Text.Encoding.UTF8.GetBytes(data), endOfMessage, null));
+    }
+
+    public void EnqueueClose() {
+        _receives.Enqueue((Array.Empty<byte>(), true, WebSocketCloseStatus.NormalClosure));
     }
 
     public void SetState(WebSocketState state) {
