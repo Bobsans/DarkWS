@@ -1,3 +1,5 @@
 #nullable enable
+DarkWS.Redis.DarkWsRedisServiceCollectionExtensions
 DarkWS.Redis.RedisConfiguration
-static DarkWS.Redis.RedisConfiguration.AddDarkWsRedis(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! channel) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DarkWS.Redis.DarkWsRedisServiceCollectionExtensions.AddDarkWsRedis(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! channel) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static DarkWS.Redis.RedisConfiguration.AddDarkWsRedis(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! channel) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!

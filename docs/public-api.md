@@ -7,11 +7,11 @@ Nullability is tracked alongside signatures and optional parameter defaults.
 A build target requires both baseline files before compilation, so deleting both
 cannot silently disable the analyzer.
 
-`PublicAPI.Shipped.txt` was generated from the tracked `v2.1.0` source with the
-pinned SDK. `PublicAPI.Unshipped.txt` contains the reviewed differences in this
-working version. The old extension entries marked `*REMOVED*` correspond to moving
-extension syntax to dedicated classes; their original static forwarding methods
-still exist and remain binary-callable.
+`PublicAPI.Shipped.txt` records the released 3.0.0 surface. The initial 2.1.0
+baseline and reviewed migration remain available in Git history;
+`PublicAPI.Unshipped.txt` is reserved for changes after 3.0.0. The old extension
+syntax moved to dedicated classes, while legacy static forwarding methods remain
+binary-callable and are deprecated for removal in a future major release.
 
 For an intentional API change:
 

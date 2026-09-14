@@ -80,11 +80,15 @@ DarkWS.DarkWsBuilder.AddHandlersFromAssembly(System.Reflection.Assembly! assembl
 DarkWS.DarkWsBuilder.AddHandlersFromAssemblyContaining<T>() -> DarkWS.DarkWsBuilder!
 DarkWS.DarkWsBuilder.AddScopeInitializer<TInitializer>() -> DarkWS.DarkWsBuilder!
 DarkWS.DarkWsBuilder.Services.get -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+DarkWS.DarkWsEndpointRouteBuilderExtensions
 DarkWS.DarkWsException
 DarkWS.DarkWsException.DarkWsException() -> void
+DarkWS.DarkWsException.DarkWsException(string! error, System.Exception? innerException = null) -> void
 DarkWS.DarkWsMiddleware
 DarkWS.DarkWsMiddleware.DarkWsMiddleware() -> void
 DarkWS.DarkWsOptions
+DarkWS.DarkWsOptions.AuthenticationFailedError.get -> string!
+DarkWS.DarkWsOptions.AuthenticationFailedError.set -> void
 DarkWS.DarkWsOptions.AuthenticationQueryParameter.get -> string!
 DarkWS.DarkWsOptions.AuthenticationQueryParameter.set -> void
 DarkWS.DarkWsOptions.AuthorizationRequiredError.get -> string!
@@ -100,12 +104,22 @@ DarkWS.DarkWsOptions.JsonOptions.get -> System.Text.Json.JsonSerializerOptions!
 DarkWS.DarkWsOptions.JsonOptions.set -> void
 DarkWS.DarkWsOptions.KeepAliveInterval.get -> System.TimeSpan
 DarkWS.DarkWsOptions.KeepAliveInterval.set -> void
+DarkWS.DarkWsOptions.KeepAliveTimeout.get -> System.TimeSpan
+DarkWS.DarkWsOptions.KeepAliveTimeout.set -> void
+DarkWS.DarkWsOptions.MaxConcurrentRequestsPerConnection.get -> int
+DarkWS.DarkWsOptions.MaxConcurrentRequestsPerConnection.set -> void
 DarkWS.DarkWsOptions.MaxMessageSizeBytes.get -> int
 DarkWS.DarkWsOptions.MaxMessageSizeBytes.set -> void
+DarkWS.DarkWsOptions.ReceiveIdleTimeout.get -> System.TimeSpan
+DarkWS.DarkWsOptions.ReceiveIdleTimeout.set -> void
 DarkWS.DarkWsOptions.RequestFailedError.get -> string!
 DarkWS.DarkWsOptions.RequestFailedError.set -> void
+DarkWS.DarkWsOptions.SendTimeout.get -> System.TimeSpan
+DarkWS.DarkWsOptions.SendTimeout.set -> void
 DarkWS.DarkWsOptions.ShutdownTimeout.get -> System.TimeSpan
 DarkWS.DarkWsOptions.ShutdownTimeout.set -> void
+DarkWS.DarkWsProtocol
+DarkWS.DarkWsServiceCollectionExtensions
 DarkWS.DarkWsTarget
 DarkWS.DarkWsTarget.All = 0 -> DarkWS.DarkWsTarget
 DarkWS.DarkWsTarget.Connection = 1 -> DarkWS.DarkWsTarget
@@ -133,8 +147,10 @@ DarkWS.ErrorResponse<T>.ErrorResponse(string! error, T details) -> void
 DarkWS.ErrorResponse<T>.WriteResultAsync(DarkWS.ResponseContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 DarkWS.ErrorResponseException
 DarkWS.ErrorResponseException.ErrorResponseException(string! error) -> void
+DarkWS.ErrorResponseException.ErrorResponseException(string! error, System.Exception? innerException) -> void
 DarkWS.ErrorResponseException<T>
 DarkWS.ErrorResponseException<T>.ErrorResponseException(string! error, T details) -> void
+DarkWS.ErrorResponseException<T>.ErrorResponseException(string! error, T details, System.Exception? innerException) -> void
 DarkWS.HandlerAttribute
 DarkWS.HandlerAttribute.HandlerAttribute(string! name) -> void
 DarkWS.HandlerAttribute.Name.get -> string!
@@ -203,10 +219,14 @@ DarkWS.WebSocketConnection.WebSocketConnection(System.Net.WebSockets.WebSocket! 
 DarkWS.WebSocketConnection.WebSocketConnection(System.Net.WebSockets.WebSocket! webSocket, Microsoft.AspNetCore.Http.HttpContext! context, DarkWS.Abstractions.IDarkWsSession? session, int maxMessageSizeBytes) -> void
 abstract DarkWS.DarkWsException.GetResponse() -> DarkWS.IResponse!
 const DarkWS.DarkWsOptions.DefaultMaxMessageSizeBytes = 1048576 -> int
+const DarkWS.DarkWsProtocol.BroadcastId = "@" -> string!
+const DarkWS.DarkWsProtocol.LegacyAuthenticationId = "@auth" -> string!
 override DarkWS.ErrorResponseException.GetResponse() -> DarkWS.IResponse!
 override DarkWS.ErrorResponseException<T>.GetResponse() -> DarkWS.IResponse!
-static DarkWS.Configuration.AddDarkWs(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DarkWS.DarkWsOptions!>? configure = null) -> DarkWS.DarkWsBuilder!
-static DarkWS.Configuration.MapDarkWs(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder! endpoints, string! pattern = "/ws") -> Microsoft.AspNetCore.Builder.IEndpointConventionBuilder!
+static DarkWS.Configuration.AddDarkWs(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DarkWS.DarkWsOptions!>? configure = null) -> DarkWS.DarkWsBuilder!
+static DarkWS.Configuration.MapDarkWs(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder! endpoints, string! pattern = "/ws") -> Microsoft.AspNetCore.Builder.IEndpointConventionBuilder!
+static DarkWS.DarkWsEndpointRouteBuilderExtensions.MapDarkWs(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder! endpoints, string! pattern = "/ws") -> Microsoft.AspNetCore.Builder.IEndpointConventionBuilder!
+static DarkWS.DarkWsServiceCollectionExtensions.AddDarkWs(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DarkWS.DarkWsOptions!>? configure = null) -> DarkWS.DarkWsBuilder!
 static DarkWS.HandlerBase.Error(string! error) -> DarkWS.IResponse!
 static DarkWS.HandlerBase.Error<T>(string! error, T details) -> DarkWS.IResponse!
 static DarkWS.HandlerBase.Ok() -> DarkWS.IResponse!

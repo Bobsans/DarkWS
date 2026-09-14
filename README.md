@@ -385,12 +385,12 @@ All three packages use one SemVer version. Update every manifest and the npm
 lockfile with one command:
 
 ```powershell
-pwsh ./scripts/set-version.ps1 2.1.0
+pwsh ./scripts/set-version.ps1 3.0.0
 ```
 
 CI runs `scripts/test-version.ps1` and rejects inconsistent package versions.
 Release tags must use the matching `vX.Y.Z` form, including an optional SemVer
-prerelease suffix such as `v2.1.0-rc.1`.
+prerelease suffix such as `v3.0.0-rc.1`.
 
 Read [CHANGELOG](CHANGELOG.md) before upgrading. The 2.1.0 entry explains the new
 1 MiB input limit and migration for applications sending larger messages. Future

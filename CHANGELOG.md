@@ -6,6 +6,23 @@ include migration guidance before a release is published.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-14
+
+### Migration from 2.x
+
+- Upgrade the server before the browser client. `authenticate()` now waits for a
+  correlated acknowledgement; handle rejection, which clears the previous session.
+- Declare nullable payload parameters where omitted/null input is intentional.
+  Invalid payloads return `invalid-request`; malformed registrations and options
+  fail startup. Remove unsupported `[Authorize]` metadata and enforce domain
+  permissions explicitly in handlers.
+- Review connection limits: 16 in-flight requests, a 30-second send timeout,
+  30-second keep-alive/PONG deadlines on .NET 9/10, and a 2-minute receive-idle
+  timeout on .NET 8. Idle .NET 8 clients must send application traffic.
+- Refresh indexed membership after external group changes with
+  `ConnectionStorage.Add(connection)`. Use canonical Redis envelope settings;
+  coordinate migration if older peers used customized envelope field names.
+
 ### Fixed
 
 - DW-036/DW-038/DW-039: Document JIT/trimming limitations, query-token logging,
@@ -114,5 +131,6 @@ fragmented messages before rollout. The three-argument WebSocketConnection
 constructor remains available. This entry records the behavior of the already
 released 2.1.0; it does not retroactively change its version or defaults.
 
-[Unreleased]: https://github.com/Bobsans/DarkWS/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/Bobsans/DarkWS/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/Bobsans/DarkWS/compare/v2.1.0...v3.0.0
 [2.1.0]: https://github.com/Bobsans/DarkWS/compare/v2.0.0...v2.1.0
