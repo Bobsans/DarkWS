@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 [xml]$props = Get-Content -Raw (Join-Path $Repository "Directory.Build.props")
-$dotnetVersion = [string]$props.Project.PropertyGroup.VersionPrefix
+$dotnetVersion = $props.SelectSingleNode("/Project/PropertyGroup/VersionPrefix").InnerText
 $npmPackagePath = Join-Path $Repository "packages/darkws/package.json"
 $npmVersion = (Get-Content -Raw $npmPackagePath | ConvertFrom-Json).version
 

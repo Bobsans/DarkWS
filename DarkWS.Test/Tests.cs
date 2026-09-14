@@ -57,6 +57,7 @@ public sealed class Tests {
     public async Task AuthMessageReplacesSessionAsync() {
         using var webSocket = await ConnectAsync("first");
         await webSocket.SendTextAsync("auth:second");
+        Assert.That((await webSocket.ReceiveMessage<ResponseMessageNoData>())?.Id, Is.EqualTo("@auth"));
         await webSocket.SendMessage(new RequestMessage("3", "test:session"));
 
         var message = await webSocket.ReceiveMessage<ResponseMessage<TestHandler.SessionResult>>();
@@ -150,6 +151,7 @@ public sealed class Tests {
         var scopeBefore = probe.ScopeInitializationCount;
         var webSocket = await ConnectAsync("first");
         await webSocket.SendTextAsync("auth:second");
+        _ = await webSocket.ReceiveMessage<ResponseMessageNoData>();
         await webSocket.SendMessage(new RequestMessage("hook", "test:get"));
         _ = await webSocket.ReceiveMessage<ResponseMessage<string>>();
         webSocket.Abort();

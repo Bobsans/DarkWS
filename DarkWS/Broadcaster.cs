@@ -78,20 +78,23 @@ internal sealed class Broadcaster(
         object data = message.Data.HasValue
             ? new BroadcastActionMessage<JsonElement>(message.Action, message.Data.Value)
             : new BroadcastActionMessage(message.Action);
+        if (connections.Count == 0) return;
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(new ResponseMessage<object>(DarkWsProtocol.BroadcastId, data), _options.JsonOptions);
 
         await Parallel.ForEachAsync(connections, cancellationToken, async (connection, token) => {
-            if (connection.WebSocket.State != WebSocketState.Open) {
+            if (!connection.IsOpen) {
                 return;
             }
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(_options.BroadcastSendTimeout);
             try {
-                await new ResponseContext(connection, "@", _options)
-                    .SendAsync(new ResponseMessage<object>("@", data), timeout.Token);
+                await connection.SendAsync(bytes, timeout.Token);
             } catch (OperationCanceledException) when (!token.IsCancellationRequested) {
                 logger.LogWarning("Broadcast to {ConnectionId} timed out; aborting connection", connection.Id);
                 connection.WebSocket.Abort();
+            } catch (Exception error) when (error is ObjectDisposedException or WebSocketException || error is OperationCanceledException && token.IsCancellationRequested) {
+                logger.LogDebug(error, "Broadcast connection {ConnectionId} closed or was cancelled", connection.Id);
             } catch (Exception error) {
                 logger.LogWarning(error, "Cannot broadcast to {ConnectionId}", connection.Id);
             }

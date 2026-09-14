@@ -1,0 +1,9 @@
+<Project>
+  <!-- The analyzer can skip checking when both API files are absent. -->
+  <Target Name="RequireDarkWsApiBaselines" BeforeTargets="CoreCompile"
+          Condition="'$(MSBuildProjectName)' == 'DarkWS' Or '$(MSBuildProjectName)' == 'DarkWS.Redis'">
+    <Error Code="DWAPI001"
+           Condition="!Exists('$(MSBuildProjectDirectory)/PublicAPI.Shipped.txt') Or !Exists('$(MSBuildProjectDirectory)/PublicAPI.Unshipped.txt')"
+           Text="Both PublicAPI.Shipped.txt and PublicAPI.Unshipped.txt are required for API compatibility checks." />
+  </Target>
+</Project>

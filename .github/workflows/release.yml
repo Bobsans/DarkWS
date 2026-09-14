@@ -26,10 +26,10 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
         with:
+          global-json-file: global.json
           dotnet-version: |
             8.0.x
             9.0.x
-            10.0.x
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -52,6 +52,9 @@ jobs:
           }
           $version = $env:RELEASE_TAG.Substring(1)
           ./scripts/check-version.ps1 -ExpectedVersion $version
+          if (-not (Select-String -LiteralPath CHANGELOG.md -Pattern "^## \[$([regex]::Escape($version))\]" -Quiet)) {
+              throw "CHANGELOG.md must contain a release entry for $version"
+          }
           $isPrerelease = $version.Contains('-')
           if ($isPrerelease -ne [bool]::Parse($env:GITHUB_PRERELEASE)) {
               throw "GitHub prerelease flag does not match version $version"

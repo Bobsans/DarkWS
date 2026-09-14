@@ -41,6 +41,12 @@ interface RequestResolver {
   reject: (error: Error) => void;
 }
 
+interface ConnectionWaiter {
+  resolve: (socket: WebSocket) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
 export class ErrorResponse<TData = unknown> extends Error {
   constructor(
     error: string,
@@ -80,6 +86,7 @@ export default class DarkWs {
   };
 
   private readonly requests = new Map<string, RequestResolver>();
+  private readonly connectionWaiters = new Set<ConnectionWaiter>();
   private readonly options: Required<Pick<DarkWsOptions,
     "reconnect" | "reconnectTimeout" | "requestTimeout" | "pingTimeout" |
     "waitConnectionTimeout" | "debug">> & DarkWsOptions;
@@ -101,7 +108,6 @@ export default class DarkWs {
       debug: false,
       ...options,
     };
-    this.schedulePing();
   }
 
   public get closing(): boolean {
@@ -166,6 +172,7 @@ export default class DarkWs {
 
   public async send<T>(data: T, jsonify = true): Promise<void> {
     const socket = await this.waitForConnection();
+    this.assertSocketOpen(socket);
     socket.send(jsonify ? JSON.stringify(data) : String(data));
     this.emit("send", data);
     this.debug("Data sent", data);
@@ -195,12 +202,18 @@ export default class DarkWs {
   }
 
   public authenticate(token: string): Promise<void> {
-    return this.send(`auth:${token}`, false);
+    return this.request<void>("darkws:authenticate", token);
+  }
+
+  public logout(): Promise<void> {
+    return this.request<void>("darkws:logout");
   }
 
   public close(code = 1000): void {
     this.closedByClient = true;
     this.clearReconnectTimer();
+    this.clearPingTimer();
+    this.rejectConnectionWaiters(new ConnectionClosedError("WebSocket connection was closed by the client"));
     if (!this.socket || this.socket.readyState === WebSocket.CLOSED) {
       return;
     }
@@ -214,10 +227,8 @@ export default class DarkWs {
     this.disposed = true;
     this.closedByClient = true;
     this.clearReconnectTimer();
-    if (this.pingTimer) {
-      clearTimeout(this.pingTimer);
-      this.pingTimer = undefined;
-    }
+    this.clearPingTimer();
+    this.rejectConnectionWaiters(new ConnectionClosedError("DarkWs client was disposed"));
     this.rejectAll(new ConnectionClosedError("DarkWs client was disposed"));
     if (this.socket && this.socket.readyState !== WebSocket.CLOSED) {
       this.socket.close(1000, DarkWs.closeReasons[1000]);
@@ -228,7 +239,7 @@ export default class DarkWs {
   private async connectAfterHook(): Promise<void> {
     try {
       await this.options.beforeConnect?.();
-      if (!this.disposed) {
+      if (!this.disposed && !this.closedByClient) {
         this.openConnection();
       }
     } catch {
@@ -246,6 +257,8 @@ export default class DarkWs {
 
     this.clearReconnectTimer();
     const previous = this.socket;
+    this.clearPingTimer();
+    this.clearPingTimer();
     if (previous) {
       this.socket = undefined;
       this.rejectRequestsFor(previous);
@@ -257,11 +270,19 @@ export default class DarkWs {
     socket.addEventListener("open", (event) => {
       if (socket !== this.socket) return;
       this.reconnectAttempts = 0;
+      this.clearPingTimer();
+      this.schedulePing();
+      for (const waiter of this.connectionWaiters) {
+        clearTimeout(waiter.timeout);
+        waiter.resolve(socket);
+      }
+      this.connectionWaiters.clear();
       this.emit("open", event);
     });
     socket.addEventListener("error", (event) => this.emit("error", event));
     socket.addEventListener("close", (event) => {
       const isCurrent = socket === this.socket;
+      if (isCurrent) this.clearPingTimer();
       if (isCurrent && !this.closedByClient && !this.disposed) {
         this.scheduleReconnect();
       }
@@ -288,32 +309,37 @@ export default class DarkWs {
 
   private async waitForConnection(): Promise<WebSocket> {
     this.assertNotDisposed();
+    if (this.closedByClient) throw new ConnectionClosedError("WebSocket connection was closed by the client");
+    if (this.closed) this.connect();
     if (this.socket?.readyState === WebSocket.OPEN) {
       return this.socket;
     }
-    if (this.closed && !this.closedByClient) {
-      this.connect();
-    }
-    const startedAt = Date.now();
     return new Promise<WebSocket>((resolve, reject) => {
-      const interval = setInterval(() => {
-        if (this.disposed) {
-          clearInterval(interval);
-          reject(new ConnectionClosedError("DarkWs client was disposed"));
-        } else if (this.socket?.readyState === WebSocket.OPEN) {
-          clearInterval(interval);
-          resolve(this.socket);
-        } else if (Date.now() - startedAt >= this.options.waitConnectionTimeout) {
-          clearInterval(interval);
+      const waiter: ConnectionWaiter = {
+        resolve,
+        reject,
+        timeout: setTimeout(() => {
+          this.connectionWaiters.delete(waiter);
           reject(new ConnectionClosedError("WebSocket connection wait timeout"));
-        }
-      }, 50);
+        }, this.options.waitConnectionTimeout),
+      };
+      this.connectionWaiters.add(waiter);
     });
+  }
+
+  private rejectConnectionWaiters(error: Error): void {
+    for (const waiter of this.connectionWaiters) {
+      clearTimeout(waiter.timeout);
+      waiter.reject(error);
+    }
+    this.connectionWaiters.clear();
   }
 
   private async sendRequest(resolver: RequestResolver, timeoutMs?: number): Promise<void> {
     try {
       const socket = await this.waitForConnection();
+      if (!this.requests.has(resolver.request.id)) return;
+      this.assertSocketOpen(socket);
       resolver.socket = socket;
       socket.send(JSON.stringify(resolver.request));
       this.emit("send", resolver.request);
@@ -348,8 +374,8 @@ export default class DarkWs {
         return;
       }
       this.clearResolver(response.id, resolver);
-      if (response.error) {
-        resolver.reject(new ErrorResponse(response.error, response.data, resolver.request));
+      if ("error" in response) {
+        resolver.reject(new ErrorResponse(response.error ?? "", response.data, resolver.request));
       } else {
         resolver.resolve(response.data);
       }
@@ -412,10 +438,17 @@ export default class DarkWs {
       if (this.socket?.readyState === WebSocket.OPEN) {
         this.socket.send("ping");
       }
-      if (!this.disposed) {
+      if (!this.disposed && this.connected && !this.closedByClient) {
         this.schedulePing();
       }
     }, this.options.pingTimeout);
+  }
+
+  private clearPingTimer(): void {
+    if (this.pingTimer !== undefined) {
+      clearTimeout(this.pingTimer);
+      this.pingTimer = undefined;
+    }
   }
 
   private emit<K extends keyof DarkWsEvents>(event: K, ...args: DarkWsEvents[K]): void {
@@ -431,6 +464,13 @@ export default class DarkWs {
   private assertNotDisposed(): void {
     if (this.disposed) {
       throw new ConnectionClosedError("DarkWs client was disposed");
+    }
+  }
+
+  private assertSocketOpen(socket: WebSocket): void {
+    this.assertNotDisposed();
+    if (this.closedByClient || socket !== this.socket || socket.readyState !== WebSocket.OPEN) {
+      throw new ConnectionClosedError("WebSocket connection closed before sending");
     }
   }
 

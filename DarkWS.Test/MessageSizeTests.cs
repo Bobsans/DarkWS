@@ -3,6 +3,7 @@ using System.Text;
 using DarkWS.Test.Project;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using NUnit.Framework;
 
 namespace DarkWS.Test;
@@ -57,7 +58,10 @@ public sealed class MessageSizeTests {
     [TestCase(0)]
     [TestCase(-1)]
     public void InvalidLimitIsRejectedAtRegistrationAndConstruction(int limit) {
-        Assert.Throws<ArgumentOutOfRangeException>(() => new ServiceCollection().AddDarkWs(options => options.MaxMessageSizeBytes = limit));
+        var services = new ServiceCollection();
+        services.AddDarkWs(options => options.MaxMessageSizeBytes = limit);
+        using var provider = services.BuildServiceProvider();
+        Assert.Throws<OptionsValidationException>(() => _ = provider.GetRequiredService<IOptions<DarkWsOptions>>().Value);
         Assert.Throws<ArgumentOutOfRangeException>(() => new WebSocketConnection(new TestWebSocket(), new DefaultHttpContext(), null, limit));
     }
 }

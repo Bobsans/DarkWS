@@ -86,6 +86,71 @@ describe("DarkWs", () => {
     vi.useRealTimers();
   });
 
+  it("starts ping only while a connection is open", () => {
+    const client = createClient({ reconnect: false });
+    expect(vi.getTimerCount()).toBe(0);
+    client.connect();
+    expect(vi.getTimerCount()).toBe(0);
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    expect(vi.getTimerCount()).toBe(1);
+    socket.serverClose();
+    expect(vi.getTimerCount()).toBe(0);
+    client.dispose();
+  });
+
+  it("releases connection waiters immediately on open without polling", async () => {
+    const client = createClient().connect();
+    const socket = MockWebSocket.instances[0];
+    const first = client.send("first", false);
+    const second = client.send("second", false);
+    expect(socket.sent).toHaveLength(0);
+    const before = Date.now();
+    socket.open();
+    await Promise.all([first, second]);
+    expect(Date.now()).toBe(before);
+    expect(socket.sent).toEqual(["first", "second"]);
+    expect(vi.getTimerCount()).toBe(1);
+    client.dispose();
+  });
+
+  it("rejects waiters on intentional close and prevents sends after an open-close race", async () => {
+    const client = createClient().connect();
+    const socket = MockWebSocket.instances[0];
+    const request = client.request("waiting");
+    const rejected = expect(request).rejects.toBeInstanceOf(ConnectionClosedError);
+    socket.open();
+    client.close();
+    await rejected;
+    expect(socket.sent).toHaveLength(0);
+    expect(client.pendingRequestCount).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    client.dispose();
+  });
+
+  it("rejects an explicit empty error field", async () => {
+    const client = createClient().connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    const request = client.request("empty-error");
+    await Promise.resolve();
+    socket.serverMessage({ id: JSON.parse(socket.sent[0] as string).id, error: "" });
+    await expect(request).rejects.toBeInstanceOf(ErrorResponse);
+    expect(client.pendingRequestCount).toBe(0);
+    client.dispose();
+  });
+
+  it("does not open after an intentional close during beforeConnect", async () => {
+    let finish!: () => void;
+    const client = createClient({ beforeConnect: () => new Promise<void>(resolve => { finish = resolve; }) }).connect();
+    client.close();
+    finish();
+    await Promise.resolve();
+    expect(MockWebSocket.instances).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+    client.dispose();
+  });
+
   it("reconnects after a clean server close", () => {
     const client = createClient().connect();
     MockWebSocket.instances[0].open();
@@ -181,13 +246,53 @@ describe("DarkWs", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("sends auth control messages", async () => {
+  it("waits for authentication acknowledgement", async () => {
     const client = createClient().connect();
     const socket = MockWebSocket.instances[0];
     socket.open();
-    await client.authenticate("secret");
+    const authenticated = client.authenticate("test-token");
+    await Promise.resolve();
+    expect(client.pendingRequestCount).toBe(1);
+    const request = JSON.parse(socket.sent[0] as string);
+    expect(request).toMatchObject({ action: "darkws:authenticate", payload: "test-token" });
+    socket.serverMessage({ id: request.id });
+    await expect(authenticated).resolves.toBeUndefined();
+    expect(client.pendingRequestCount).toBe(0);
+    client.dispose();
+  });
 
-    expect(socket.sent).toContain("auth:secret");
+  it("reports authentication rejection and permits logout without reconnect", async () => {
+    const client = createClient().connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    const authentication = client.authenticate("expired");
+    const rejected = expect(authentication).rejects.toMatchObject({ message: "darkws:error:authentication-failed" });
+    await Promise.resolve();
+    socket.serverMessage({ id: JSON.parse(socket.sent[0] as string).id, error: "darkws:error:authentication-failed" });
+    await rejected;
+    const logout = client.logout();
+    await Promise.resolve();
+    const request = JSON.parse(socket.sent[1] as string);
+    expect(request.action).toBe("darkws:logout");
+    socket.serverMessage({ id: request.id });
+    await expect(logout).resolves.toBeUndefined();
+    expect(client.connected).toBe(true);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    client.dispose();
+  });
+
+  it("bounds authentication waits and rejects logout on disconnect", async () => {
+    const client = createClient({ requestTimeout: 10 }).connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    const authentication = expect(client.authenticate("test-token")).rejects.toBeInstanceOf(RequestTimeoutError);
+    await vi.advanceTimersByTimeAsync(10);
+    await authentication;
+    const logout = expect(client.logout()).rejects.toBeInstanceOf(ConnectionClosedError);
+    await Promise.resolve();
+    socket.serverClose();
+    await logout;
+    expect(client.pendingRequestCount).toBe(0);
     client.dispose();
   });
 

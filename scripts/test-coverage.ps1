@@ -42,6 +42,9 @@ try {
 
     npm --prefix packages/darkws run build
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    & "$PSScriptRoot/test-packages.ps1"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
     Pop-Location
 }

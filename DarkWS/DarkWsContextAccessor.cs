@@ -6,14 +6,18 @@ namespace DarkWS;
 
 internal sealed class DarkWsContextAccessor : IDarkWsContextAccessor {
     public IDarkWsSession? Session => Connection.Session;
-    public HttpContext HttpContext { get; private set; } = null!;
+    private IWebSocketConnection? _connection;
+    private CancellationToken _connectionAborted;
+    public HttpContext HttpContext => Connection.HttpContext;
     public ISession? AspNetSession => HttpContext.Features.Get<ISessionFeature>()?.Session;
-    public IWebSocketConnection Connection { get; private set; } = null!;
-    public CancellationToken ConnectionAborted { get; private set; }
+    public IWebSocketConnection Connection => _connection
+        ?? throw new InvalidOperationException("DarkWS context is available only in a message scope or through the context passed to a lifecycle hook");
+    public CancellationToken ConnectionAborted {
+        get { _ = Connection; return _connectionAborted; }
+    }
 
     public void Initialize(IWebSocketConnection connection, CancellationToken cancellationToken) {
-        Connection = connection;
-        HttpContext = connection.HttpContext;
-        ConnectionAborted = cancellationToken;
+        _connection = connection;
+        _connectionAborted = cancellationToken;
     }
 }

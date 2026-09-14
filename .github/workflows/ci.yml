@@ -12,6 +12,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      DARKWS_PACKAGE_OUTPUT: ${{ runner.temp }}/darkws-packages
 
     steps:
       - uses: actions/checkout@v7
@@ -19,10 +21,10 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
         with:
+          global-json-file: global.json
           dotnet-version: |
             8.0.x
             9.0.x
-            10.0.x
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -41,3 +43,28 @@ jobs:
       - name: Run tests and coverage gates
         shell: pwsh
         run: ./scripts/test-coverage.ps1
+
+      - name: Save verified packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages
+          path: ${{ env.DARKWS_PACKAGE_OUTPUT }}/*
+          if-no-files-found: error
+
+  redis-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        redis: ['2.13.17', '3.2.1']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          dotnet-version: |
+            8.0.x
+            9.0.x
+      - name: Test Redis dependency compatibility
+        run: dotnet test DarkWS.Redis.Test/DarkWS.Redis.Test.csproj -p:StackExchangeRedisVersion=${{ matrix.redis }}

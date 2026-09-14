@@ -1,17 +1,11 @@
-using DarkWS.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace DarkWS.Redis;
 
+/// <summary>Compatibility entry point for legacy static Redis registration calls.</summary>
+[Obsolete("Use DarkWsRedisServiceCollectionExtensions. This wrapper will be removed in the next major release.")]
 public static class RedisConfiguration {
-    public static IServiceCollection AddDarkWsRedis(
-        this IServiceCollection services,
-        string channel
-    ) {
-        ArgumentException.ThrowIfNullOrWhiteSpace(channel);
-        services.AddSingleton(new RedisDarkWsOptions(channel));
-        services.Replace(ServiceDescriptor.Singleton<IDarkWsBackplane, RedisDarkWsBackplane>());
-        return services;
-    }
+    /// <summary>Forwards the legacy static Redis backplane registration call.</summary>
+    public static IServiceCollection AddDarkWsRedis(IServiceCollection services, string channel)
+        => DarkWsRedisServiceCollectionExtensions.AddDarkWsRedis(services, channel);
 }
