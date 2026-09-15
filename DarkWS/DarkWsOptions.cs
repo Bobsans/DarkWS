@@ -34,6 +34,6 @@ public sealed class DarkWsOptions {
     public string AuthorizationRequiredError { get; set; } = "darkws:error:authorization-required";
     /// <summary>Unexpected handler failure code. Default darkws:error:request-failed.</summary>
     public string RequestFailedError { get; set; } = "darkws:error:request-failed";
-    /// <summary>Rejected re-authentication code. Default darkws:error:authentication-failed.</summary>
+    /// <summary>Legacy JSON authentication error code. Text authentication always replies auth:failed.</summary>
     public string AuthenticationFailedError { get; set; } = "darkws:error:authentication-failed";
 }

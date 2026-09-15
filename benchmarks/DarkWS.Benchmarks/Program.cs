@@ -14,7 +14,7 @@ var samples = quick ? 3 : 5;
 var iterations = quick ? 1 : 20;
 var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 var payload = JsonSerializer.SerializeToElement(new { Text = new string('x', 256), Values = Enumerable.Range(0, 16).ToArray() });
-var envelope = new ResponseMessage<object>(DarkWsProtocol.BroadcastId, new BroadcastActionMessage<JsonElement>("changed", payload));
+var envelope = new BroadcastActionMessage<JsonElement>("changed", payload);
 var inputBytes = JsonSerializer.SerializeToUtf8Bytes(new InputMessage("request", "example:echo", payload), json);
 long consumed = 0;
 

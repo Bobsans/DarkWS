@@ -6,11 +6,11 @@ namespace DarkWS;
 /// <summary>Incoming request envelope. Id and Action are required; payload nullability follows the action signature.</summary>
 /// <param name="Id">Correlation or identity key.</param>
 /// <param name="Action">Application action name.</param>
-/// <param name="Payload">Optional JSON payload.</param>
+/// <param name="Payload">Optional request data, serialized as the data field.</param>
 public sealed record InputMessage(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("action")] string Action,
-    [property: JsonPropertyName("payload")] JsonElement? Payload
+    [property: JsonPropertyName("data")] JsonElement? Payload
 );
 
 /// <summary>Successful response without data, correlated by request id.</summary>
@@ -45,16 +45,24 @@ public sealed record ErrorMessage<T>(
     [property: JsonPropertyName("data")] T? Data
 );
 
-/// <summary>Notification body containing the application action and optional data.</summary>
+/// <summary>Notification envelope containing the reserved id and application action.</summary>
 /// <param name="Action">Application action name.</param>
 public sealed record BroadcastActionMessage(
     [property: JsonPropertyName("action")] string Action
-);
+) {
+    /// <summary>Reserved notification id.</summary>
+    [JsonPropertyName("id"), JsonPropertyOrder(-1)]
+    public string Id => DarkWsProtocol.BroadcastId;
+}
 
-/// <summary>Notification body containing the application action and optional data.</summary>
+/// <summary>Notification envelope containing the reserved id, application action, and data.</summary>
 /// <param name="Action">Application action name.</param>
 /// <param name="Data">Optional result or notification data.</param>
 public sealed record BroadcastActionMessage<T>(
     [property: JsonPropertyName("action")] string Action,
     [property: JsonPropertyName("data")] T? Data
-);
+) {
+    /// <summary>Reserved notification id.</summary>
+    [JsonPropertyName("id"), JsonPropertyOrder(-1)]
+    public string Id => DarkWsProtocol.BroadcastId;
+}

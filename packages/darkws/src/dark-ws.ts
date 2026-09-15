@@ -24,17 +24,19 @@ export interface DarkWsOptions {
 export interface DarkWsRequest<TPayload = unknown> {
   id: string;
   action: string;
-  payload?: TPayload;
+  data?: TPayload;
 }
 
 interface ResponseMessage {
   id: string;
+  action?: string;
   data?: unknown;
   error?: string;
 }
 
 interface RequestResolver {
   request: DarkWsRequest;
+  control?: boolean;
   socket?: WebSocket;
   timeout?: ReturnType<typeof setTimeout>;
   resolve: (value: unknown) => void;
@@ -86,6 +88,8 @@ export default class DarkWs {
   };
 
   private readonly requests = new Map<string, RequestResolver>();
+  private controlTail: Promise<void> = Promise.resolve();
+  private controlRequest?: RequestResolver;
   private readonly connectionWaiters = new Set<ConnectionWaiter>();
   private readonly options: Required<Pick<DarkWsOptions,
     "reconnect" | "reconnectTimeout" | "requestTimeout" | "pingTimeout" |
@@ -187,7 +191,7 @@ export default class DarkWs {
     const request: DarkWsRequest<TPayload> = {
       id: crypto.randomUUID(),
       action,
-      ...(payload === undefined ? {} : { payload }),
+      ...(payload === undefined ? {} : { data: payload }),
     };
 
     return new Promise<TResult>((resolve, reject) => {
@@ -202,11 +206,28 @@ export default class DarkWs {
   }
 
   public authenticate(token: string): Promise<void> {
-    return this.request<void>("darkws:authenticate", token);
+    return this.systemRequest("auth", "auth:" + token);
   }
 
   public logout(): Promise<void> {
-    return this.request<void>("darkws:logout");
+    return this.systemRequest("logout", "logout");
+  }
+
+  private systemRequest(action: string, text: string): Promise<void> {
+    this.assertNotDisposed();
+    const previous = this.controlTail;
+    const result = new Promise<void>((resolve, reject) => {
+      const resolver: RequestResolver = {
+        request: { id: crypto.randomUUID(), action },
+        control: true,
+        resolve: () => resolve(),
+        reject,
+      };
+      this.requests.set(resolver.request.id, resolver);
+      void this.sendRequest(resolver, undefined, { text, previous });
+    });
+    this.controlTail = result.catch(() => {});
+    return result;
   }
 
   public close(code = 1000): void {
@@ -335,13 +356,15 @@ export default class DarkWs {
     this.connectionWaiters.clear();
   }
 
-  private async sendRequest(resolver: RequestResolver, timeoutMs?: number): Promise<void> {
+  private async sendRequest(resolver: RequestResolver, timeoutMs?: number, control?: { text: string; previous: Promise<void> }): Promise<void> {
     try {
       const socket = await this.waitForConnection();
+      resolver.socket = socket;
+      if (control) await control.previous;
       if (!this.requests.has(resolver.request.id)) return;
       this.assertSocketOpen(socket);
-      resolver.socket = socket;
-      socket.send(JSON.stringify(resolver.request));
+      if (control) this.controlRequest = resolver;
+      socket.send(control ? control.text : JSON.stringify(resolver.request));
       this.emit("send", resolver.request);
       if (!this.requests.has(resolver.request.id)) {
         return;
@@ -349,13 +372,23 @@ export default class DarkWs {
       const timeout = timeoutMs ?? this.options.requestTimeout;
       if (timeout > 0) {
         resolver.timeout = setTimeout(() => {
-          this.requests.delete(resolver.request.id);
+          this.clearResolver(resolver.request.id, resolver);
           resolver.reject(new RequestTimeoutError("Request cancelled by timeout"));
+          if (control) {
+            // Text acknowledgements cannot be correlated after a timeout.
+            this.rejectRequestsFor(socket);
+            socket.close(1000);
+          }
         }, timeout);
       }
     } catch (error) {
-      this.requests.delete(resolver.request.id);
+      const ambiguousSocket = control && this.controlRequest === resolver ? resolver.socket : undefined;
+      this.clearResolver(resolver.request.id, resolver);
       resolver.reject(error instanceof Error ? error : new Error(String(error)));
+      if (ambiguousSocket) {
+        this.rejectRequestsFor(ambiguousSocket);
+        ambiguousSocket.close(1000);
+      }
     }
   }
 
@@ -363,14 +396,23 @@ export default class DarkWs {
     if (event.data === "pong") {
       return;
     }
+    if (event.data === "auth:success" || event.data === "auth:failed" || event.data === "logout:success") {
+      const resolver = this.controlRequest;
+      if (resolver && String(event.data).startsWith(resolver.request.action + ":")) {
+        this.clearResolver(resolver.request.id, resolver);
+        if (event.data === "auth:failed") resolver.reject(new ErrorResponse("auth:failed", undefined, resolver.request));
+        else resolver.resolve(undefined);
+      }
+      return;
+    }
     try {
       const response = JSON.parse(String(event.data)) as ResponseMessage;
       if (response.id === "@") {
-        this.emit("message", response.data, event);
+        this.emit("message", response, event);
         return;
       }
       const resolver = this.requests.get(response.id);
-      if (!resolver) {
+      if (!resolver || resolver.control) {
         return;
       }
       this.clearResolver(response.id, resolver);
@@ -401,6 +443,7 @@ export default class DarkWs {
   }
 
   private clearResolver(id: string, resolver: RequestResolver): void {
+    if (this.controlRequest === resolver) this.controlRequest = undefined;
     if (resolver.timeout) {
       clearTimeout(resolver.timeout);
     }

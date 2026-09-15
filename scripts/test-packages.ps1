@@ -11,7 +11,7 @@ $packageVersion = $buildProperties.SelectSingleNode("/Project/PropertyGroup/Vers
 $frameworks = $buildProperties.SelectSingleNode("/Project/PropertyGroup/TargetFrameworks").InnerText.Split(';')
 Push-Location $repository
 try {
-    foreach ($package in "DarkWS", "DarkWS.Redis") {
+    foreach ($package in "DarkWS", "DarkWS.Redis", "DarkWS.Client", "DarkWS.Client.DependencyInjection") {
         dotnet pack "$package/$package.csproj" -c Release --no-restore -o $packageOutput
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         $archivePath = Get-Item -LiteralPath (Join-Path $packageOutput "$package.$packageVersion.nupkg")
@@ -19,6 +19,13 @@ try {
         $archive = [System.IO.Compression.ZipFile]::OpenRead($archivePath.FullName)
         $symbols = [System.IO.Compression.ZipFile]::OpenRead($symbolsPath)
         try {
+            if ($package -eq "DarkWS.Client") {
+                $manifestReader = [System.IO.StreamReader]::new($archive.GetEntry("$package.nuspec").Open())
+                try { [xml]$manifest = $manifestReader.ReadToEnd() } finally { $manifestReader.Dispose() }
+                if ($manifest.SelectNodes("//*[local-name()='dependency' or local-name()='frameworkReference']").Count -ne 0) {
+                    throw "The core client package must not have runtime package or framework dependencies"
+                }
+            }
             foreach ($framework in $frameworks) {
                 $documentation = $archive.GetEntry("lib/$framework/$package.xml")
                 $pdb = $symbols.GetEntry("lib/$framework/$package.pdb")
@@ -59,7 +66,7 @@ try {
 <configuration>
   <packageSources><clear/><add key="local" value="$localFeed"/><add key="nuget" value="https://api.nuget.org/v3/index.json"/></packageSources>
   <packageSourceMapping>
-    <packageSource key="local"><package pattern="DarkWS"/><package pattern="DarkWS.Redis"/></packageSource>
+    <packageSource key="local"><package pattern="DarkWS"/><package pattern="DarkWS.Redis"/><package pattern="DarkWS.Client"/><package pattern="DarkWS.Client.DependencyInjection"/></packageSource>
     <packageSource key="nuget"><package pattern="*"/></packageSource>
   </packageSourceMapping>
 </configuration>
@@ -69,6 +76,17 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     foreach ($framework in $frameworks) {
         dotnet run --project $smokeProject -c Release -f $framework --no-restore "-p:DarkWsSmokeVersion=$packageVersion"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+
+    $clientSmokePath = Join-Path $smokePath "client-only"
+    New-Item -ItemType Directory -Path $clientSmokePath | Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "client-smoke/ClientSmoke.csproj"), (Join-Path $PSScriptRoot "client-smoke/Program.cs") -Destination $clientSmokePath
+    $clientSmokeProject = Join-Path $clientSmokePath "ClientSmoke.csproj"
+    dotnet restore $clientSmokeProject --configfile (Join-Path $smokePath "NuGet.Config") --packages (Join-Path $smokePath "packages") "-p:DarkWsSmokeVersion=$packageVersion"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    foreach ($framework in $frameworks) {
+        dotnet run --project $clientSmokeProject -c Release -f $framework --no-restore "-p:DarkWsSmokeVersion=$packageVersion"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 

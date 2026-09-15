@@ -74,6 +74,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet pack DarkWS.Redis/DarkWS.Redis.csproj -c Release --no-restore -o artifacts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet pack DarkWS.Client/DarkWS.Client.csproj -c Release --no-restore -o artifacts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet pack DarkWS.Client.DependencyInjection/DarkWS.Client.DependencyInjection.csproj -c Release --no-restore -o artifacts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Push-Location packages/darkws
           try {
               npm pack --pack-destination ../../artifacts

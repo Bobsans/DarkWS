@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Title>DarkWS.Client.DependencyInjection</Title>
+    <Description>Optional Microsoft dependency injection integration for DarkWS.Client.</Description>
+    <PackageTags>websocket;client;dependency-injection</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../DarkWS.Client/DarkWS.Client.csproj" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
+</Project>

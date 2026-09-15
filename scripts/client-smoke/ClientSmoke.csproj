@@ -8,9 +8,6 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <PackageReference Include="DarkWS" Version="$(DarkWsSmokeVersion)" />
-    <PackageReference Include="DarkWS.Redis" Version="$(DarkWsSmokeVersion)" />
-    <PackageReference Include="DarkWS.Client.DependencyInjection" Version="$(DarkWsSmokeVersion)" />
+    <PackageReference Include="DarkWS.Client" Version="$(DarkWsSmokeVersion)" />
   </ItemGroup>
 </Project>

@@ -83,7 +83,9 @@ public sealed class BroadcastTests {
         Assert.That(otherSocket.Sent, Is.Empty);
         using var message = JsonDocument.Parse(matchingSocket.Sent.Single());
         Assert.That(message.RootElement.GetProperty("id").GetString(), Is.EqualTo("@"));
-        Assert.That(message.RootElement.GetProperty("data").GetProperty("action").GetString(), Is.EqualTo("updated"));
+        Assert.That(message.RootElement.GetProperty("action").GetString(), Is.EqualTo("updated"));
+        Assert.That(message.RootElement.GetProperty("data").GetProperty("value").GetInt32(), Is.EqualTo(1));
+        Assert.That(message.RootElement.EnumerateObject().Count(), Is.EqualTo(3));
         await host.StopAsync();
     }
 
@@ -128,7 +130,7 @@ public sealed class BroadcastTests {
 
         var actions = socket.Sent.Select(data => {
             using var message = JsonDocument.Parse(data);
-            return message.RootElement.GetProperty("data").GetProperty("action").GetString();
+            return message.RootElement.GetProperty("action").GetString();
         });
         Assert.That(actions, Is.EqualTo(new[] { "connection-data", "session-empty", "group-empty" }));
         await host.StopAsync();
@@ -187,6 +189,6 @@ public sealed class BroadcastTests {
 
     private static string? ReadAction(TestWebSocket socket) {
         using var message = JsonDocument.Parse(socket.Sent.Single());
-        return message.RootElement.GetProperty("data").GetProperty("action").GetString();
+        return message.RootElement.GetProperty("action").GetString();
     }
 }

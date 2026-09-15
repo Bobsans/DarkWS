@@ -75,14 +75,14 @@ public sealed class AuditRemediationTests {
     }
 
     [TestCase("input", "", true)]
-    [TestCase("input", ",\"payload\":null", true)]
-    [TestCase("input", ",\"payload\":{\"text\":[1,2]}", true)]
-    [TestCase("number", ",\"payload\":99999999999", true)]
+    [TestCase("input", ",\"data\":null", true)]
+    [TestCase("input", ",\"data\":{\"text\":[1,2]}", true)]
+    [TestCase("number", ",\"data\":99999999999", true)]
     [TestCase("number", "", true)]
     [TestCase("nullable", "", false)]
-    [TestCase("nullable", ",\"payload\":null", false)]
+    [TestCase("nullable", ",\"data\":null", false)]
     [TestCase("nullable-number", "", false)]
-    [TestCase("input", ",\"payload\":{\"text\":\"ok\"}", false)]
+    [TestCase("input", ",\"data\":{\"text\":\"ok\"}", false)]
     public async Task PayloadContractDistinguishesInvalidAndNullableInput(string action, string payload, bool invalid) {
         using var provider = CreateProvider();
         var socket = new TestWebSocket();
@@ -207,18 +207,18 @@ public sealed class AuditRemediationTests {
         var storage = provider.GetRequiredService<ConnectionStorage>();
         var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(connection);
         foreach (var token in new[] { "first", "rejected", "second", "", "third", "throws", "last" }) {
-            socket.EnqueueReceive(JsonSerializer.Serialize(new { id = "auth", action = "darkws:authenticate", payload = token }));
+            socket.EnqueueReceive("auth:" + token);
             await UntilAsync(() => socket.Sent.Count == 1);
             socket.Sent.TryDequeue(out var bytes);
-            using var response = JsonDocument.Parse(bytes!);
             var valid = token is "first" or "second" or "third" or "last";
-            Assert.That(response.RootElement.TryGetProperty("error", out _), Is.EqualTo(!valid));
+            Assert.That(System.Text.Encoding.UTF8.GetString(bytes!), Is.EqualTo(valid ? "auth:success" : "auth:failed"));
             Assert.That(connection.Session?.Id, Is.EqualTo(valid ? token : null));
             Assert.That(connection.HttpContext.User.Identity?.IsAuthenticated, Is.EqualTo(valid));
             Assert.That(storage.GetByGroup("session:first"), valid && token == "first" ? Has.Count.EqualTo(1) : Is.Empty);
         }
-        socket.EnqueueReceive("{\"id\":\"logout\",\"action\":\"darkws:logout\"}");
+        socket.EnqueueReceive("logout");
         await UntilAsync(() => socket.Sent.Count == 1);
+        Assert.That(System.Text.Encoding.UTF8.GetString(socket.Sent.Single()), Is.EqualTo("logout:success"));
         Assert.That(connection.Session, Is.Null);
         Assert.That(storage.GetBySession("last"), Is.Empty);
         Assert.That(connection.IsOpen, Is.True);
@@ -282,7 +282,7 @@ public sealed class AuditRemediationTests {
         public override BroadcastActionMessage Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => throw new NotSupportedException();
         public override void Write(Utf8JsonWriter writer, BroadcastActionMessage value, JsonSerializerOptions options) {
             Writes++;
-            writer.WriteStartObject(); writer.WriteString("action", value.Action); writer.WriteEndObject();
+            writer.WriteStartObject(); writer.WriteString("id", value.Id); writer.WriteString("action", value.Action); writer.WriteEndObject();
         }
     }
 }

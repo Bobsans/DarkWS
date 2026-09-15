@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Title>DarkWS.Client</Title>
+    <Description>Async .NET client for the DarkWS WebSocket protocol.</Description>
+    <PackageTags>websocket;client;realtime;rpc</PackageTags>
+  </PropertyGroup>
+</Project>

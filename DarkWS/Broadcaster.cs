@@ -75,11 +75,11 @@ internal sealed class Broadcaster(
             _ => throw new ArgumentOutOfRangeException(nameof(message), message.Target, null)
         };
 
-        object data = message.Data.HasValue
+        object notification = message.Data.HasValue
             ? new BroadcastActionMessage<JsonElement>(message.Action, message.Data.Value)
             : new BroadcastActionMessage(message.Action);
         if (connections.Count == 0) return;
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(new ResponseMessage<object>(DarkWsProtocol.BroadcastId, data), _options.JsonOptions);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(notification, _options.JsonOptions);
 
         await Parallel.ForEachAsync(connections, cancellationToken, async (connection, token) => {
             if (!connection.IsOpen) {

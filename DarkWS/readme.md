@@ -98,13 +98,14 @@ handler tokens are cancelled. Handlers must cooperate with cancellation. Tasks
 that ignore it retain their scope/connection resources until actual completion,
 while the socket is aborted and further responses are suppressed.
 
-Reserved requests `darkws:authenticate` (string token payload) and `darkws:logout`
-receive correlated acknowledgements. Rejected authentication clears the previous
-session and returns `darkws:error:authentication-failed`; logout clears it without
-closing the socket. `OnAuthenticatedAsync` runs after success, rejection, and
-logout, and its current session can be null. Legacy `auth:<token>` remains accepted
-and now replies with id `@auth`. Token expiry and revocation enforcement remain
-the application's responsibility; already running actions are not rolled back.
+System commands are plain text: `auth:<token>` receives `auth:success` or
+`auth:failed`; `logout` receives `logout:success`; `ping` receives `pong`.
+Rejected authentication and logout clear the previous session. `OnAuthenticatedAsync`
+runs after success, rejection, and logout, and its current session can be null.
+JSON authentication/logout actions and `@auth` replies are no longer used.
+The legacy `AuthenticationFailedError` option does not customize text replies.
+Token expiry and revocation enforcement remain the application's responsibility;
+already running actions are not rolled back.
 
 Session and group indexes refresh on registration and re-authentication. Re-add
 the connection with `ConnectionStorage.Add` after external group changes.

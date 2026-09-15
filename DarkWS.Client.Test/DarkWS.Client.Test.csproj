@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="NUnit" />
+    <PackageReference Include="NUnit.Analyzers" PrivateAssets="all" />
+    <PackageReference Include="NUnit3TestAdapter" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../DarkWS/DarkWS.csproj" />
+    <ProjectReference Include="../DarkWS.Client.DependencyInjection/DarkWS.Client.DependencyInjection.csproj" />
+  </ItemGroup>
+</Project>

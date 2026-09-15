@@ -1,17 +1,21 @@
 # Public API maintenance
 
-Both libraries reference Microsoft.CodeAnalysis.PublicApiAnalyzers as a private
+All four libraries reference Microsoft.CodeAnalysis.PublicApiAnalyzers as a private
 build dependency. Ordinary builds and CI reject undeclared API additions/removals,
 duplicate entries, missing baseline files, and inconsistent removal markers.
 Nullability is tracked alongside signatures and optional parameter defaults.
 A build target requires both baseline files before compilation, so deleting both
 cannot silently disable the analyzer.
 
-`PublicAPI.Shipped.txt` records the released 3.0.0 surface. The initial 2.1.0
+`PublicAPI.Shipped.txt` records the released 4.0.0 surface. The initial 2.1.0
 baseline and reviewed migration remain available in Git history;
-`PublicAPI.Unshipped.txt` is reserved for changes after 3.0.0. The old extension
+`PublicAPI.Unshipped.txt` is reserved for changes after 4.0.0. The old extension
 syntax moved to dedicated classes, while legacy static forwarding methods remain
 binary-callable and are deprecated for removal in a future major release.
+
+The new client and DI packages record their complete initial 4.0.0 API in Shipped.
+The client's initial request overloads intentionally distinguish omitted payload
+from explicit null; RS0026 is suppressed locally for these declared overloads.
 
 For an intentional API change:
 

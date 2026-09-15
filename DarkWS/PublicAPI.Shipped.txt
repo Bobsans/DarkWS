@@ -234,3 +234,5 @@ static DarkWS.HandlerBase.Ok<T>(T data) -> DarkWS.IResponse!
 virtual DarkWS.DarkWsMiddleware.OnAuthenticatedAsync(DarkWS.Abstractions.IDarkWsContextAccessor! context, DarkWS.Abstractions.IDarkWsSession? previousSession) -> System.Threading.Tasks.Task!
 virtual DarkWS.DarkWsMiddleware.OnCloseAsync(DarkWS.Abstractions.IDarkWsContextAccessor! context) -> System.Threading.Tasks.Task!
 virtual DarkWS.DarkWsMiddleware.OnOpenAsync(DarkWS.Abstractions.IDarkWsContextAccessor! context) -> System.Threading.Tasks.Task!
+DarkWS.BroadcastActionMessage.Id.get -> string!
+DarkWS.BroadcastActionMessage<T>.Id.get -> string!

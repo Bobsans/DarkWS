@@ -1,6 +1,6 @@
 {
   "name": "darkws",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "description": "Dependency-free DarkWS client for browsers",
   "keywords": [
     "websocket",

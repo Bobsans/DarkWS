@@ -6,6 +6,52 @@ include migration guidance before a release is published.
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-09-15
+
+### Changed
+
+- Breaking wire protocol change: request arguments move from `payload` to `data`,
+  broadcasts become `{ "id": "@", "action": "...", "data": ... }`, and authentication
+  and logout use text commands `auth:<token>` / `logout` with replies
+  `auth:success`, `auth:failed`, and `logout:success`.
+- The browser `message` event now exposes the full flat broadcast envelope.
+  The .NET client reads the same schema. Application response/error envelopes,
+  text heartbeat, and the Redis backplane envelope are unchanged.
+- Authentication/logout run sequentially in both clients. A lost acknowledgement
+  discards the connection; .NET cancellation of an in-flight system command does
+  the same. Token values are excluded from system-command diagnostic metadata.
+
+### Migration
+
+- Upgrade server and clients together. Custom clients must rename request
+  `payload` to `data`, read broadcast `action` at the top level, and replace JSON
+  authentication/logout requests with the text commands above. Text authentication
+  no longer emits a JSON `@auth` response. `AuthenticationFailedError` is retained
+  for source compatibility but does not customize the fixed `auth:failed` reply.
+  No automatic fallback to the previous JSON schema is provided.
+- Roll back server and clients together. There is no persisted-data migration.
+  The CLR `InputMessage.Payload` property and SDK method payload parameters keep
+  their source names; their wire field is `data`.
+
+### Added
+
+- `DarkWS.Client`: a standalone .NET 8/9/10 client with lazy connection, typed
+  requests and subscriptions, acknowledged authentication/logout, cancellation,
+  bounded queues, text heartbeat, and reconnect without replaying commands.
+- `DarkWS.Client.DependencyInjection`: optional lazy singleton registration of
+  `IDarkWsClient`, with container-owned disposal and explicit per-session examples.
+- Public API baselines, real-socket integration tests, and isolated installed-package
+  consumer checks for both client packages, including a console without ASP.NET.
+
+### Compatibility
+
+- The client uses the server's wire schema; see the 4.0.0 protocol migration
+  above. Acknowledged authentication requires matching
+  server and client versions.
+- Client connection readiness, notification backpressure, and pong deadlines are
+  documented in its README. Client Native AOT/mobile/legacy runtime support is not
+  certified in this release.
+
 ## [3.0.0] - 2026-09-14
 
 ### Migration from 2.x

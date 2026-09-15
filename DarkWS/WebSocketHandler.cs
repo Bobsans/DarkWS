@@ -22,6 +22,10 @@ internal sealed class WebSocketHandler(
     private static readonly byte[] _ping = "ping"u8.ToArray();
     private static readonly byte[] _pong = "pong"u8.ToArray();
     private static readonly byte[] _auth = "auth:"u8.ToArray();
+    private static readonly byte[] _authSuccess = "auth:success"u8.ToArray();
+    private static readonly byte[] _authFailed = "auth:failed"u8.ToArray();
+    private static readonly byte[] _logout = "logout"u8.ToArray();
+    private static readonly byte[] _logoutSuccess = "logout:success"u8.ToArray();
     private readonly DarkWsOptions _options = options.Value;
 
     public IBroadcaster Broadcaster { get; } = broadcaster;
@@ -49,15 +53,14 @@ internal sealed class WebSocketHandler(
                 if (message.Data.AsSpan().SequenceEqual(_ping)) {
                     await connection.SendAsync(_pong, cancellationToken);
                 } else if (message.Data.AsSpan().StartsWith(_auth)) {
-                    var result = await AuthenticateAsync(Encoding.UTF8.GetString(message.Data.AsSpan(_auth.Length)), connection, cancellationToken);
-                    await result.WriteResultAsync(new ResponseContext(connection, DarkWsProtocol.LegacyAuthenticationId, _options), cancellationToken);
+                    var authenticated = await AuthenticateAsync(Encoding.UTF8.GetString(message.Data.AsSpan(_auth.Length)), connection, cancellationToken);
+                    await connection.SendAsync(authenticated ? _authSuccess : _authFailed, cancellationToken);
+                } else if (message.Data.AsSpan().SequenceEqual(_logout)) {
+                    await SetSessionAsync(connection, null, cancellationToken);
+                    await connection.SendAsync(_logoutSuccess, cancellationToken);
                 } else {
                     var input = await ReadMessageAsync(message.Data, connection, cancellationToken);
                     if (input is null) continue;
-                    if (input.Action is "darkws:authenticate" or "darkws:logout") {
-                        await ProcessControlAsync(input, connection, cancellationToken);
-                        continue;
-                    }
                     tasks.RemoveAll(it => it.IsCompleted);
                     if (tasks.Count >= _options.MaxConcurrentRequestsPerConnection) {
                         await Task.WhenAny(tasks).WaitAsync(cancellationToken);
@@ -160,7 +163,7 @@ internal sealed class WebSocketHandler(
         }
     }
 
-    private async Task<IResponse> AuthenticateAsync(
+    private async Task<bool> AuthenticateAsync(
         string? token,
         WebSocketConnection connection,
         CancellationToken cancellationToken
@@ -175,7 +178,7 @@ internal sealed class WebSocketHandler(
         }
 
         await SetSessionAsync(connection, session, cancellationToken);
-        return session is null ? new ErrorResponse(_options.AuthenticationFailedError) : new SuccessResponse();
+        return session is not null;
     }
 
     private async Task SetSessionAsync(WebSocketConnection connection, IDarkWsSession? session, CancellationToken cancellationToken) {
@@ -186,17 +189,6 @@ internal sealed class WebSocketHandler(
         foreach (var middleware in middlewares) {
             await middleware.OnAuthenticatedAsync(context, previousSession);
         }
-    }
-
-    private async Task ProcessControlAsync(InputMessage message, WebSocketConnection connection, CancellationToken cancellationToken) {
-        IResponse result;
-        if (message.Action == "darkws:logout") {
-            await SetSessionAsync(connection, null, cancellationToken);
-            result = new SuccessResponse();
-        } else {
-            result = await AuthenticateAsync(message.Payload is { ValueKind: JsonValueKind.String } payload ? payload.GetString() : null, connection, cancellationToken);
-        }
-        await result.WriteResultAsync(new ResponseContext(connection, message.Id, _options), cancellationToken);
     }
 
     private async Task ShutdownAsync(

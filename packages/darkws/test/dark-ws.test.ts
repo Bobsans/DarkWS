@@ -52,6 +52,10 @@ class MockWebSocket {
     this.emit("message", { target: this, data: JSON.stringify(message) });
   }
 
+  serverText(text: string): void {
+    this.emit("message", { target: this, data: text });
+  }
+
   serverError(): void {
     this.emit("error", { target: this });
   }
@@ -209,6 +213,23 @@ describe("DarkWs", () => {
     client.dispose();
   });
 
+  it.each([undefined, null, { text: "hello" }])("sends request data %j without a payload field", async (data) => {
+    const client = createClient().connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    const response = client.request("message:send", data);
+    await Promise.resolve();
+    const request = JSON.parse(socket.sent[0] as string);
+    expect(request).toEqual({
+      id: expect.any(String),
+      action: "message:send",
+      ...(data === undefined ? {} : { data }),
+    });
+    socket.serverMessage({ id: request.id });
+    await expect(response).resolves.toBeUndefined();
+    client.dispose();
+  });
+
   it("rejects server errors with request context", async () => {
     const client = createClient().connect();
     const socket = MockWebSocket.instances[0];
@@ -251,11 +272,10 @@ describe("DarkWs", () => {
     const socket = MockWebSocket.instances[0];
     socket.open();
     const authenticated = client.authenticate("test-token");
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     expect(client.pendingRequestCount).toBe(1);
-    const request = JSON.parse(socket.sent[0] as string);
-    expect(request).toMatchObject({ action: "darkws:authenticate", payload: "test-token" });
-    socket.serverMessage({ id: request.id });
+    expect(socket.sent).toEqual(["auth:test-token"]);
+    socket.serverText("auth:success");
     await expect(authenticated).resolves.toBeUndefined();
     expect(client.pendingRequestCount).toBe(0);
     client.dispose();
@@ -266,15 +286,14 @@ describe("DarkWs", () => {
     const socket = MockWebSocket.instances[0];
     socket.open();
     const authentication = client.authenticate("expired");
-    const rejected = expect(authentication).rejects.toMatchObject({ message: "darkws:error:authentication-failed" });
-    await Promise.resolve();
-    socket.serverMessage({ id: JSON.parse(socket.sent[0] as string).id, error: "darkws:error:authentication-failed" });
+    const rejected = expect(authentication).rejects.toMatchObject({ message: "auth:failed" });
+    await vi.advanceTimersByTimeAsync(0);
+    socket.serverText("auth:failed");
     await rejected;
     const logout = client.logout();
-    await Promise.resolve();
-    const request = JSON.parse(socket.sent[1] as string);
-    expect(request.action).toBe("darkws:logout");
-    socket.serverMessage({ id: request.id });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.sent[1]).toBe("logout");
+    socket.serverText("logout:success");
     await expect(logout).resolves.toBeUndefined();
     expect(client.connected).toBe(true);
     expect(MockWebSocket.instances).toHaveLength(1);
@@ -286,12 +305,68 @@ describe("DarkWs", () => {
     const socket = MockWebSocket.instances[0];
     socket.open();
     const authentication = expect(client.authenticate("test-token")).rejects.toBeInstanceOf(RequestTimeoutError);
+    const queued = expect(client.logout()).rejects.toBeInstanceOf(ConnectionClosedError);
     await vi.advanceTimersByTimeAsync(10);
     await authentication;
+    await queued;
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED);
+    expect(socket.sent).toEqual(["auth:test-token"]);
+    client.connect();
+    const next = MockWebSocket.instances[1];
+    next.open();
     const logout = expect(client.logout()).rejects.toBeInstanceOf(ConnectionClosedError);
-    await Promise.resolve();
-    socket.serverClose();
+    await vi.advanceTimersByTimeAsync(0);
+    next.serverClose();
     await logout;
+    expect(client.pendingRequestCount).toBe(0);
+    client.dispose();
+  });
+
+  it("discards a system command when the socket send fails", async () => {
+    const client = createClient().connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    vi.spyOn(socket, "send").mockImplementationOnce(() => { throw new Error("send failed"); });
+    const authentication = expect(client.authenticate("token")).rejects.toThrow("send failed");
+    const logout = expect(client.logout()).rejects.toBeInstanceOf(ConnectionClosedError);
+    await vi.advanceTimersByTimeAsync(0);
+    await authentication;
+    await logout;
+    expect(socket.sent).toEqual([]);
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED);
+    expect(client.pendingRequestCount).toBe(0);
+    client.dispose();
+  });
+
+  it("serializes system commands and keeps JSON responses and pong independent", async () => {
+    const client = createClient().connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    const sent: unknown[] = [];
+    client.on("send", value => sent.push(value));
+    const auth = client.authenticate("private-token");
+    const logout = client.logout();
+    const request = client.request<number>("read");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.sent.filter(value => String(value).startsWith("auth:"))).toEqual(["auth:private-token"]);
+    expect(socket.sent).not.toContain("logout");
+    expect(JSON.stringify(sent)).not.toContain("private-token");
+    const metadata = sent.find(value => (value as { action: string }).action === "auth") as { id: string };
+    socket.serverMessage({ id: metadata.id });
+    socket.serverText("logout:success");
+    socket.serverText("pong");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.sent).not.toContain("logout");
+    const json = JSON.parse(socket.sent.find(value => String(value).startsWith("{")) as string);
+    socket.serverMessage({ id: json.id, data: 42 });
+    await expect(request).resolves.toBe(42);
+    socket.serverText("auth:success");
+    await auth;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.sent.at(-1)).toBe("logout");
+    socket.serverText("logout:success");
+    await logout;
+    socket.serverText("auth:failed");
     expect(client.pendingRequestCount).toBe(0);
     client.dispose();
   });
@@ -302,16 +377,18 @@ describe("DarkWs", () => {
     client.dispose();
   });
 
-  it("delivers broadcast action and data", () => {
+  it.each([undefined, null, { id: 42 }])("delivers a flat broadcast with data %j", (data) => {
     const client = createClient().connect();
     const received: unknown[] = [];
     client.on("message", (data) => received.push(data));
-    MockWebSocket.instances[0].serverMessage({
+    const notification = {
       id: "@",
-      data: { action: "client:sync", data: { id: 42 } },
-    });
+      action: "client:sync",
+      ...(data === undefined ? {} : { data }),
+    };
+    MockWebSocket.instances[0].serverMessage(notification);
 
-    expect(received).toEqual([{ action: "client:sync", data: { id: 42 } }]);
+    expect(received).toEqual([notification]);
     client.dispose();
   });
 

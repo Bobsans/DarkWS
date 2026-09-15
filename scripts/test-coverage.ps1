@@ -21,7 +21,7 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     [xml]$coverage = Get-Content -Raw $coveragePath
-    foreach ($packageName in "DarkWS", "DarkWS.Redis") {
+    foreach ($packageName in "DarkWS", "DarkWS.Redis", "DarkWS.Client", "DarkWS.Client.DependencyInjection") {
         $package = $coverage.coverage.packages.package |
             Where-Object name -EQ $packageName |
             Select-Object -First 1

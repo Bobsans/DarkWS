@@ -19,6 +19,8 @@ backplane.
 | --- | --- |
 | [`DarkWS`](DarkWS/) | ASP.NET Core server with an in-memory backplane |
 | [`DarkWS.Redis`](DarkWS.Redis/) | Redis backplane for multi-instance deployments |
+| [`DarkWS.Client`](DarkWS.Client/) | Async .NET client with typed requests and broadcasts |
+| [`DarkWS.Client.DependencyInjection`](DarkWS.Client.DependencyInjection/) | Optional Microsoft DI registration of `IDarkWsClient` |
 | [`darkws`](packages/darkws/) | Dependency-free ESM browser client with TypeScript declarations |
 
 The .NET packages target .NET 8, 9, and 10. The browser package targets modern
@@ -266,6 +268,20 @@ and channel ACLs, and scope channels per application/environment. Logical Redis
 database numbers do **not** isolate Pub/Sub channels ([Redis documentation](https://redis.io/docs/latest/develop/pubsub/#database--scoping)).
 `MaxMessageSizeBytes` limits WebSocket input, not Redis messages.
 
+## .NET client
+
+```csharp
+await using var client = new DarkWS.Client.DarkWsClient(new Uri("wss://example.com/ws"));
+var result = await client.RequestAsync<MyResult>("my:action", new { value = 42 });
+```
+
+The first request connects automatically. The core package has no ASP.NET or DI
+dependency. For optional DI, install `DarkWS.Client.DependencyInjection` and call
+`services.AddDarkWsClient(options => options.Endpoint = endpoint)`; inject
+`IDarkWsClient`. One client owns one server session, so use separate instances for
+different accounts. See [client usage and defaults](DarkWS.Client/readme.md) and
+[DI lifetime examples](DarkWS.Client.DependencyInjection/readme.md).
+
 ## Browser client
 
 ```ts
@@ -312,27 +328,41 @@ including an empty string from an external server; DarkWS itself rejects empty c
 
 | Direction | Shape |
 | --- | --- |
-| Request | `{ "id": string, "action": string, "payload"?: unknown }` |
+| Request | `{ "id": string, "action": string, "data"?: unknown }` |
 | Success | `{ "id": string, "data"?: unknown }` |
 | Error | `{ "id": string, "error": string, "data"?: unknown }` |
-| Broadcast | `{ "id": "@", "data": { "action": string, "data"?: unknown } }` |
+| Broadcast | `{ "id": "@", "action": string, "data"?: unknown }` |
 
-Control messages use plain text: the client sends `ping` or `auth:<token>`, and
-the server answers `pong` to a ping.
+Request arguments are sent in `data`; broadcasts carry `action` at the top level.
+The browser client's `message` event receives the full broadcast envelope.
+This schema is incompatible with the previous request `payload`, nested broadcasts,
+and `darkws:authenticate` action. Upgrade server and clients together; roll them
+back together if needed. The CLR `InputMessage.Payload` property and SDK method
+payload parameters retain their names but map to the wire `data` field.
+
+System commands and their replies are plain text, without JSON or request ids:
+
+| Command | Success | Rejection |
+| --- | --- | --- |
+| `auth:<token>` | `auth:success` | `auth:failed` |
+| `logout` | `logout:success` | Connection failure if the operation cannot complete |
+| `ping` | `pong` | No application error reply |
 
 Request ids must be non-empty and must not be `@` or `@auth`. A request using a
 reserved id is rejected without invoking its action. The `invalid-request` response
 uses an empty id because echoing a reserved id would turn it into a control event.
 
-The acknowledged authentication API uses ordinary correlated requests:
-`darkws:authenticate` with a string token payload, and `darkws:logout` without a
-payload. These action names are reserved. Success returns `{ "id": "..." }`;
-rejection returns `darkws:error:authentication-failed` and clears the previous
-session and principal. Both changes notify `OnAuthenticatedAsync`, whose current
+Authentication rejection clears the previous session and principal. Logout also
+clears the session. Both changes notify `OnAuthenticatedAsync`, whose current
 session may now be null. Already running actions are not rolled back by logout.
-The legacy `auth:<token>` input remains supported and receives a response with
-id `@auth`, safely ignored by older clients. The new npm authentication methods
-require a server supporting these actions; older servers return `invalid-action`.
+JSON actions `darkws:authenticate` / `darkws:logout` are no longer system commands, and
+`@auth` replies are no longer emitted. `@auth` remains a reserved legacy request id.
+The legacy `AuthenticationFailedError` option does not customize `auth:failed`.
+
+Clients serialize authentication and logout because text replies have no correlation
+id. A timeout (or cancellation while waiting in .NET) discards the socket so a late
+reply cannot complete the next command. No automatic replay of a sent command occurs.
+Wait for authentication success before sending protected application requests.
 
 The client does not retain tokens for reconnect. Update the application-owned
 `query`/authentication source after logout so reconnect cannot restore old
@@ -346,7 +376,7 @@ await `client.authenticate(token)` before protected requests. Use WSS and redact
 credentials in URL and message logging. The application owns token validation,
 expiry, and revocation. See [ASP.NET Core token logging guidance](https://learn.microsoft.com/en-us/aspnet/core/signalr/security#access-token-logging).
 
-Both NuGet packages include XML API documentation and portable symbol packages
+All NuGet packages include XML API documentation and portable symbol packages
 with embedded source files. `scripts/test-packages.ps1` checks every target's XML
 and PDB entries after packing.
 
@@ -361,14 +391,14 @@ pwsh ./scripts/test-coverage.ps1
 Docker must be running for Redis integration tests. Current gates require at
 least 90% line coverage and 80% branch coverage for every package.
 
-The gate also packs both NuGet libraries, verifies documentation/symbols, restores
+The gate also packs all four NuGet libraries, verifies documentation/symbols, restores
 them into a consumer with an isolated package cache, and runs it on all target
 frameworks. A fresh npm copy without `dist` is packed to verify the prepack build.
 CI retains the resulting packages as artifacts. Successful actions and malformed
 client requests are logged at Debug; unexpected handler failures remain warnings.
 
 Manual performance scenarios live in [benchmarks](benchmarks/README.md); they
-are not run on every PR. Both libraries enforce reviewed public API baselines
+are not run on every PR. All libraries enforce reviewed public API baselines
 with PublicApiAnalyzers; see [API maintenance](docs/public-api.md).
 
 ## Roadmap
@@ -381,11 +411,11 @@ with PublicApiAnalyzers; see [API maintenance](docs/public-api.md).
 The build uses the exact SDK in `global.json`. Common project settings live in
 `Directory.Build.props`; NuGet versions are centralized in `Directory.Packages.props`.
 
-All three packages use one SemVer version. Update every manifest and the npm
+All five packages use one SemVer version. Update every manifest and the npm
 lockfile with one command:
 
 ```powershell
-pwsh ./scripts/set-version.ps1 3.0.0
+pwsh ./scripts/set-version.ps1 4.0.0
 ```
 
 CI runs `scripts/test-version.ps1` and rejects inconsistent package versions.
@@ -419,7 +449,7 @@ For each release:
 1. Run `scripts/set-version.ps1` and commit the version change.
 2. Create a GitHub Release using the matching `vX.Y.Z` tag.
 3. The release workflow validates the tag, runs every test and coverage gate,
-   packs all artifacts, then publishes both NuGet packages and the npm package.
+   packs all artifacts, then publishes all four NuGet packages and the npm package.
 
 Prerelease versions require a GitHub prerelease and use the npm `next` tag.
 Stable versions use the npm `latest` tag. Re-running a release is safe: NuGet

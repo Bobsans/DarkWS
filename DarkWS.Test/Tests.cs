@@ -57,7 +57,7 @@ public sealed class Tests {
     public async Task AuthMessageReplacesSessionAsync() {
         using var webSocket = await ConnectAsync("first");
         await webSocket.SendTextAsync("auth:second");
-        Assert.That((await webSocket.ReceiveMessage<ResponseMessageNoData>())?.Id, Is.EqualTo("@auth"));
+        Assert.That(System.Text.Encoding.UTF8.GetString(await webSocket.ReceiveRawMessage()), Is.EqualTo("auth:success"));
         await webSocket.SendMessage(new RequestMessage("3", "test:session"));
 
         var message = await webSocket.ReceiveMessage<ResponseMessage<TestHandler.SessionResult>>();
@@ -151,7 +151,7 @@ public sealed class Tests {
         var scopeBefore = probe.ScopeInitializationCount;
         var webSocket = await ConnectAsync("first");
         await webSocket.SendTextAsync("auth:second");
-        _ = await webSocket.ReceiveMessage<ResponseMessageNoData>();
+        Assert.That(System.Text.Encoding.UTF8.GetString(await webSocket.ReceiveRawMessage()), Is.EqualTo("auth:success"));
         await webSocket.SendMessage(new RequestMessage("hook", "test:get"));
         _ = await webSocket.ReceiveMessage<ResponseMessage<string>>();
         webSocket.Abort();
@@ -179,10 +179,10 @@ public sealed class Tests {
         using var webSocket = await ConnectAsync("first");
         await webSocket.SendMessage(new RequestMessage<string>("7", "test:broadcast", "hello"));
 
-        var broadcast = await webSocket.ReceiveMessage<ResponseMessage<BroadcastActionMessage>>();
+        var broadcast = await webSocket.ReceiveMessage<BroadcastActionMessage>();
         Assert.That(
             broadcast,
-            Is.EqualTo(new ResponseMessage<BroadcastActionMessage>("@", new BroadcastActionMessage("hello")))
+            Is.EqualTo(new BroadcastActionMessage("hello"))
         );
         Assert.That(
             await webSocket.ReceiveMessage<ResponseMessageNoData>(),

@@ -1,0 +1,101 @@
+#nullable enable
+DarkWS.Client.DarkWsClient
+DarkWS.Client.DarkWsClient.AuthenticateAsync(string! token, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Client.DarkWsClient.CloseAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Client.DarkWsClient.ConnectAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Client.DarkWsClient.DarkWsClient(DarkWS.Client.DarkWsClientOptions! options) -> void
+DarkWS.Client.DarkWsClient.DarkWsClient(System.Uri! endpoint) -> void
+DarkWS.Client.DarkWsClient.Dispose() -> void
+DarkWS.Client.DarkWsClient.DisposeAsync() -> System.Threading.Tasks.ValueTask
+DarkWS.Client.DarkWsClient.Error -> System.EventHandler<DarkWS.Client.DarkWsClientErrorEventArgs!>?
+DarkWS.Client.DarkWsClient.LogoutAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Client.DarkWsClient.On(string! action, System.Action! handler) -> System.IDisposable!
+DarkWS.Client.DarkWsClient.On<T>(string! action, System.Action<T>! handler) -> System.IDisposable!
+DarkWS.Client.DarkWsClient.OnAsync<T>(string! action, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task!>! handler) -> System.IDisposable!
+DarkWS.Client.DarkWsClient.RequestAsync(string! action, object? payload, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Client.DarkWsClient.RequestAsync(string! action, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Client.DarkWsClient.RequestAsync<TResponse>(string! action, object? payload, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResponse>!
+DarkWS.Client.DarkWsClient.RequestAsync<TResponse>(string! action, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResponse>!
+DarkWS.Client.DarkWsClient.State.get -> DarkWS.Client.DarkWsClientState
+DarkWS.Client.DarkWsClient.StateChanged -> System.EventHandler<DarkWS.Client.DarkWsStateChangedEventArgs!>?
+DarkWS.Client.DarkWsClientErrorEventArgs
+DarkWS.Client.DarkWsClientErrorEventArgs.DarkWsClientErrorEventArgs(System.Exception! exception) -> void
+DarkWS.Client.DarkWsClientErrorEventArgs.Exception.get -> System.Exception!
+DarkWS.Client.DarkWsClientLimitException
+DarkWS.Client.DarkWsClientLimitException.DarkWsClientLimitException(string! message) -> void
+DarkWS.Client.DarkWsClientOptions
+DarkWS.Client.DarkWsClientOptions.AuthenticationTokenProvider.get -> System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string?>>?
+DarkWS.Client.DarkWsClientOptions.AuthenticationTokenProvider.set -> void
+DarkWS.Client.DarkWsClientOptions.CloseTimeout.get -> System.TimeSpan
+DarkWS.Client.DarkWsClientOptions.CloseTimeout.set -> void
+DarkWS.Client.DarkWsClientOptions.ConfigureWebSocketOptionsAsync.get -> System.Func<System.Net.WebSockets.ClientWebSocketOptions!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>?
+DarkWS.Client.DarkWsClientOptions.ConfigureWebSocketOptionsAsync.set -> void
+DarkWS.Client.DarkWsClientOptions.ConnectionTimeout.get -> System.TimeSpan
+DarkWS.Client.DarkWsClientOptions.ConnectionTimeout.set -> void
+DarkWS.Client.DarkWsClientOptions.DarkWsClientOptions() -> void
+DarkWS.Client.DarkWsClientOptions.Endpoint.get -> System.Uri!
+DarkWS.Client.DarkWsClientOptions.Endpoint.set -> void
+DarkWS.Client.DarkWsClientOptions.JsonOptions.get -> System.Text.Json.JsonSerializerOptions!
+DarkWS.Client.DarkWsClientOptions.JsonOptions.set -> void
+DarkWS.Client.DarkWsClientOptions.MaxMessageSizeBytes.get -> int
+DarkWS.Client.DarkWsClientOptions.MaxMessageSizeBytes.set -> void
+DarkWS.Client.DarkWsClientOptions.MaxPendingRequests.get -> int
+DarkWS.Client.DarkWsClientOptions.MaxPendingRequests.set -> void
+DarkWS.Client.DarkWsClientOptions.NotificationQueueCapacity.get -> int
+DarkWS.Client.DarkWsClientOptions.NotificationQueueCapacity.set -> void
+DarkWS.Client.DarkWsClientOptions.PingInterval.get -> System.TimeSpan
+DarkWS.Client.DarkWsClientOptions.PingInterval.set -> void
+DarkWS.Client.DarkWsClientOptions.PongTimeout.get -> System.TimeSpan
+DarkWS.Client.DarkWsClientOptions.PongTimeout.set -> void
+DarkWS.Client.DarkWsClientOptions.Reconnect.get -> bool
+DarkWS.Client.DarkWsClientOptions.Reconnect.set -> void
+DarkWS.Client.DarkWsClientOptions.RequestTimeout.get -> System.TimeSpan
+DarkWS.Client.DarkWsClientOptions.RequestTimeout.set -> void
+DarkWS.Client.DarkWsClientOptions.SendTimeout.get -> System.TimeSpan
+DarkWS.Client.DarkWsClientOptions.SendTimeout.set -> void
+DarkWS.Client.DarkWsClientState
+DarkWS.Client.DarkWsClientState.Connected = 2 -> DarkWS.Client.DarkWsClientState
+DarkWS.Client.DarkWsClientState.Connecting = 1 -> DarkWS.Client.DarkWsClientState
+DarkWS.Client.DarkWsClientState.Disconnected = 0 -> DarkWS.Client.DarkWsClientState
+DarkWS.Client.DarkWsClientState.Disposed = 4 -> DarkWS.Client.DarkWsClientState
+DarkWS.Client.DarkWsClientState.Reconnecting = 3 -> DarkWS.Client.DarkWsClientState
+DarkWS.Client.DarkWsConnectionException
+DarkWS.Client.DarkWsConnectionException.CloseReason.get -> string?
+DarkWS.Client.DarkWsConnectionException.CloseStatus.get -> System.Net.WebSockets.WebSocketCloseStatus?
+DarkWS.Client.DarkWsConnectionException.DarkWsConnectionException(string! message, System.Net.WebSockets.WebSocketCloseStatus? closeStatus = null, string? closeReason = null, System.Exception? innerException = null) -> void
+DarkWS.Client.DarkWsProtocolException
+DarkWS.Client.DarkWsProtocolException.CloseStatus.get -> System.Net.WebSockets.WebSocketCloseStatus
+DarkWS.Client.DarkWsProtocolException.DarkWsProtocolException(string! message, System.Net.WebSockets.WebSocketCloseStatus closeStatus = System.Net.WebSockets.WebSocketCloseStatus.ProtocolError) -> void
+DarkWS.Client.DarkWsResponseException
+DarkWS.Client.DarkWsResponseException.Action.get -> string!
+DarkWS.Client.DarkWsResponseException.Code.get -> string!
+DarkWS.Client.DarkWsResponseException.DarkWsResponseException(string! code, System.Text.Json.JsonElement? errorData, string! requestId, string! action) -> void
+DarkWS.Client.DarkWsResponseException.ErrorData.get -> System.Text.Json.JsonElement?
+DarkWS.Client.DarkWsResponseException.RequestId.get -> string!
+DarkWS.Client.DarkWsStateChangedEventArgs
+DarkWS.Client.DarkWsStateChangedEventArgs.DarkWsStateChangedEventArgs(DarkWS.Client.DarkWsClientState previousState, DarkWS.Client.DarkWsClientState state, System.Exception? reason = null) -> void
+DarkWS.Client.DarkWsStateChangedEventArgs.PreviousState.get -> DarkWS.Client.DarkWsClientState
+DarkWS.Client.DarkWsStateChangedEventArgs.Reason.get -> System.Exception?
+DarkWS.Client.DarkWsStateChangedEventArgs.State.get -> DarkWS.Client.DarkWsClientState
+DarkWS.Client.DarkWsTimeoutException
+DarkWS.Client.DarkWsTimeoutException.DarkWsTimeoutException(DarkWS.Client.DarkWsTimeoutStage stage) -> void
+DarkWS.Client.DarkWsTimeoutException.Stage.get -> DarkWS.Client.DarkWsTimeoutStage
+DarkWS.Client.DarkWsTimeoutStage
+DarkWS.Client.DarkWsTimeoutStage.Connection = 0 -> DarkWS.Client.DarkWsTimeoutStage
+DarkWS.Client.DarkWsTimeoutStage.Response = 2 -> DarkWS.Client.DarkWsTimeoutStage
+DarkWS.Client.DarkWsTimeoutStage.Send = 1 -> DarkWS.Client.DarkWsTimeoutStage
+DarkWS.Client.IDarkWsClient
+DarkWS.Client.IDarkWsClient.AuthenticateAsync(string! token, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Client.IDarkWsClient.CloseAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Client.IDarkWsClient.ConnectAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Client.IDarkWsClient.Error -> System.EventHandler<DarkWS.Client.DarkWsClientErrorEventArgs!>?
+DarkWS.Client.IDarkWsClient.LogoutAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Client.IDarkWsClient.On(string! action, System.Action! handler) -> System.IDisposable!
+DarkWS.Client.IDarkWsClient.On<T>(string! action, System.Action<T>! handler) -> System.IDisposable!
+DarkWS.Client.IDarkWsClient.OnAsync<T>(string! action, System.Func<T, System.Threading.CancellationToken, System.Threading.Tasks.Task!>! handler) -> System.IDisposable!
+DarkWS.Client.IDarkWsClient.RequestAsync(string! action, object? payload, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Client.IDarkWsClient.RequestAsync(string! action, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Client.IDarkWsClient.RequestAsync<TResponse>(string! action, object? payload, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResponse>!
+DarkWS.Client.IDarkWsClient.RequestAsync<TResponse>(string! action, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResponse>!
+DarkWS.Client.IDarkWsClient.State.get -> DarkWS.Client.DarkWsClientState
+DarkWS.Client.IDarkWsClient.StateChanged -> System.EventHandler<DarkWS.Client.DarkWsStateChangedEventArgs!>?

@@ -11,6 +11,25 @@ using NUnit.Framework;
 namespace DarkWS.Test;
 
 public sealed class PublicContractTests {
+    [Test]
+    public void WebSocketEnvelopesUseDataAndFlatBroadcasts() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseUpper };
+        var data = JsonSerializer.SerializeToElement(new { text = "hello" });
+        var request = JsonSerializer.SerializeToElement(new InputMessage("1", "message:send", data), options);
+        Assert.That(request.EnumerateObject().Select(property => property.Name), Is.EquivalentTo(new[] { "id", "action", "data" }));
+        Assert.That(request.GetProperty("data").GetProperty("text").GetString(), Is.EqualTo("hello"));
+
+        var notification = JsonSerializer.SerializeToElement(new BroadcastActionMessage<JsonElement>("message:created", data), options);
+        Assert.That(notification.EnumerateObject().Select(property => property.Name), Is.EquivalentTo(new[] { "id", "action", "data" }));
+        Assert.That(notification.GetProperty("id").GetString(), Is.EqualTo("@"));
+        Assert.That(notification.GetProperty("action").GetString(), Is.EqualTo("message:created"));
+        Assert.That(notification.GetProperty("data").GetProperty("text").GetString(), Is.EqualTo("hello"));
+
+        var empty = JsonSerializer.SerializeToElement(new BroadcastActionMessage("changed"), options);
+        Assert.That(empty.EnumerateObject().Select(property => property.Name), Is.EquivalentTo(new[] { "id", "action" }));
+        Assert.That(empty.GetProperty("id").GetString(), Is.EqualTo("@"));
+    }
+
     [TestCase(DarkWsTarget.All, 0)]
     [TestCase(DarkWsTarget.Connection, 1)]
     [TestCase(DarkWsTarget.Session, 2)]

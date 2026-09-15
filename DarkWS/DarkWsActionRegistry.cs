@@ -39,9 +39,6 @@ internal sealed class DarkWsActionRegistry {
             }
 
             var key = handlerName is null ? action.Name : $"{handlerName}:{action.Name}";
-            if (key is "darkws:authenticate" or "darkws:logout") {
-                throw new InvalidOperationException($"Handler action '{key}' is reserved for connection control");
-            }
             if (_actions.ContainsKey(key)) {
                 throw new InvalidOperationException($"Handler action '{key}' is already registered");
             }
