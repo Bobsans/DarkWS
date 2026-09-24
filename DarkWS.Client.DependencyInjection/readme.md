@@ -63,9 +63,10 @@ services.AddScoped<IDarkWsClient>(provider => {
 ```
 
 Match the scope lifetime to the session: an ordinary HTTP request scope ends with
-that request. Do not combine this registration with `AddDarkWsClient`. Normal
-keyed registrations or application-owned instances cover multiple endpoints;
-there is no custom named-client framework.
+that request. Do not combine this unkeyed registration with `AddDarkWsClient`.
+Keyed registrations (which `AddDarkWsClient` does not treat as duplicates) or
+application-owned instances cover multiple endpoints; there is no custom
+named-client framework.
 
 See the core package README for cancellation, reconnect, notification delivery,
 timeouts, and authentication rules.

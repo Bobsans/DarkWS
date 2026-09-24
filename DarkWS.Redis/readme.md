@@ -8,7 +8,13 @@ builder.Services.AddDarkWsRedis("my-app:production");
 ```
 
 Register `DarkWS` before this package. Use a unique channel per
-application and environment.
+application and environment. Call `AddDarkWsRedis` once; a second call throws
+`InvalidOperationException`.
+
+Redis Pub/Sub delivers at most once: broadcasts published while an instance is
+disconnected from Redis are lost for that instance's clients without an error.
+Treat broadcasts as change notifications and have clients refresh state after
+`IConnectionMultiplexer.ConnectionRestored`, as after a client reconnect.
 
 The host owns the connection multiplexer. This package retains its 2.13.17
 minimum dependency and is also tested against StackExchange.Redis 3.2.1.

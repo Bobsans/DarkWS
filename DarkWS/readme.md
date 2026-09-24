@@ -9,9 +9,14 @@ builder.Services
     .AddHandlersFromAssemblyContaining<Program>()
     .AddAuthenticator<AppAuthenticator, AppSession>();
 
-app.UseWebSockets();
+app.UseWebSockets(new WebSocketOptions { AllowedOrigins = { "https://app.example.com" } });
 app.MapDarkWs("/ws");
 ```
+
+CORS does not apply to WebSockets: with cookie authentication, restrict
+`WebSocketOptions.AllowedOrigins` so another site cannot open a socket that carries
+the user's cookie. Other origins receive 403 before DarkWS runs; an empty list
+allows every origin.
 
 ```csharp
 public sealed record AppSession(
@@ -34,7 +39,9 @@ public sealed class MessageHandler : HandlerBase<AppSession> {
 
 Handlers require an authenticated session by default. Add `[AllowAnonymous]`
 to public handlers or actions. Register `AddSession` and call `UseSession`
-before `MapDarkWs` when handlers need ASP.NET `ISession`.
+before `MapDarkWs` when handlers need ASP.NET `ISession`. Concurrent actions of
+one connection share its `HttpContext`, `Items`, and `ISession`, which are not
+thread-safe: do not modify them concurrently.
 
 ## Incoming message limit
 
@@ -50,17 +57,19 @@ services.AddDarkWs(options => options.MaxMessageSizeBytes = 256 * 1024);
 
 ## Request concurrency and liveness
 
-`MaxConcurrentRequestsPerConnection` defaults to 16 and must be positive. At
-capacity, request dispatch waits for a running request before accepting more
-work. Socket reads slow down; responses can arrive out of order and use `id`
-for correlation. The host or reverse proxy must enforce total connection and
-per-user/IP limits. Slow handlers can delay reading control messages at capacity.
+`MaxConcurrentRequestsPerConnection` defaults to 16 and must be positive. Up to
+that many requests run and as many more wait in order while the socket keeps
+being read, so `ping` and transport PONGs are handled even at capacity. A request
+that finds the queue full for `RequestQueueTimeout` (5 seconds) receives
+`BusyError` (`darkws:error:busy`); keep it below `KeepAliveTimeout` and client
+pong timeouts. Responses can arrive out of order and use `id` for correlation.
+The host or reverse proxy must enforce total connection and per-user/IP limits.
 
 `KeepAliveInterval` defaults to 30 seconds. On .NET 9/10, `KeepAliveTimeout`
 (30 seconds) enables transport PING/PONG failure detection. On .NET 8,
 `ReceiveIdleTimeout` (2 minutes) aborts a connection when a pending socket read
-times out. Each received fragment resets this timer; it is inactive while
-backpressure pauses reads. Idle clients must send application traffic such as
+times out. Each received fragment resets this timer; it is inactive while a full
+request queue pauses reads. Idle clients must send application traffic such as
 text `ping`; the browser client does so every 30 seconds by default. Transport
 PONGs do not reset the application receive timer. All timeout options must be
 positive and at most 4294967294 milliseconds.
@@ -89,6 +98,11 @@ An injected `IDarkWsContextAccessor` is initialized only inside a message scope.
 Other scopes receive `InvalidOperationException` on property access. Lifecycle
 middleware should use the context supplied to its hook.
 
+Results are serialized before the message scope is disposed, so deferred data over
+a scoped service is still readable. A `null` result, a result that cannot be
+serialized, or a custom `IResponse` that fails before sending is answered with
+`darkws:error:request-failed` and logged; the connection stays open.
+
 ## Shutdown and authentication
 
 `SendTimeout` defaults to 30 seconds and includes send-lock wait and transport
@@ -96,7 +110,9 @@ write. Expiration aborts the socket. `ShutdownTimeout` bounds the whole shutdown
 pending tasks, close hooks, and handshake. Connections leave storage immediately;
 handler tokens are cancelled. Handlers must cooperate with cancellation. Tasks
 that ignore it retain their scope/connection resources until actual completion,
-while the socket is aborted and further responses are suppressed.
+while the socket is aborted and further responses are suppressed. In
+`OnCloseAsync`, `ConnectionAborted` is the shutdown deadline, not the cancelled
+handler token.
 
 System commands are plain text: `auth:<token>` receives `auth:success` or
 `auth:failed`; `logout` receives `logout:success`; `ping` receives `pong`.
@@ -108,7 +124,8 @@ Token expiry and revocation enforcement remain the application's responsibility;
 already running actions are not rolled back.
 
 Session and group indexes refresh on registration and re-authentication. Re-add
-the connection with `ConnectionStorage.Add` after external group changes.
+the connection with `ConnectionStorage.Add` after external group changes; closed
+connections are ignored, so a refresh racing with disconnect cannot re-register them.
 XML API documentation and `.snupkg` symbols with embedded sources are included.
 
 ## Compatibility and diagnostics

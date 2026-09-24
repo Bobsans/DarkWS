@@ -29,6 +29,22 @@ try {
     }
     if (-not $invalidRejected) { throw "Invalid version was accepted" }
 
+    # Editing package.json and the props by hand, without npm, must not pass with a stale lockfile.
+    $packagePath = Join-Path $temporary "packages/darkws/package.json"
+    $package = Get-Content -Raw $packagePath | ConvertFrom-Json
+    $package.version = "2.0.0"
+    $package | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $packagePath
+    $propsPath = Join-Path $temporary "Directory.Build.props"
+    (Get-Content -Raw $propsPath) -replace '<VersionPrefix>[^<]+</VersionPrefix>', '<VersionPrefix>2.0.0</VersionPrefix>' |
+        Set-Content -LiteralPath $propsPath
+    $staleLockRejected = $false
+    try {
+        & (Join-Path $PSScriptRoot "check-version.ps1") -Repository $temporary | Out-Null
+    } catch {
+        $staleLockRejected = $true
+    }
+    if (-not $staleLockRejected) { throw "A stale package-lock.json version was accepted" }
+
     Write-Output "Version tests passed"
 } finally {
     if (Test-Path -LiteralPath $temporary) {

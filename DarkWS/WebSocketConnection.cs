@@ -144,15 +144,20 @@ public sealed class WebSocketConnection(
         lock (_lifecycle) {
             if (_closing) return;
             _closing = true;
+        }
+        // Cancellation callbacks and inline continuations run outside the lock.
+        try {
             _stopping.Cancel();
+        } catch (ObjectDisposedException) {
+            // A concurrent Dispose released the source after the last operation ended; nothing is left to stop.
         }
     }
 
     /// <summary>Stops operations and releases transport resources after active I/O finishes. Repeated calls are safe.</summary>
     public void Dispose() {
+        BeginClosing();
         lock (_lifecycle) {
             if (_disposed) return;
-            BeginClosing();
             _disposed = true;
             if (_operations == 0) DisposeResources();
             else WebSocket.Abort();

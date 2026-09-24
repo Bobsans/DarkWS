@@ -105,6 +105,7 @@ public sealed class PublicContractTests {
     [TestCase(nameof(DarkWsOptions.InvalidRequestError))]
     [TestCase(nameof(DarkWsOptions.AuthorizationRequiredError))]
     [TestCase(nameof(DarkWsOptions.RequestFailedError))]
+    [TestCase(nameof(DarkWsOptions.BusyError))]
     [TestCase(nameof(DarkWsOptions.AuthenticationFailedError))]
     public void InvalidStringOptionsFailValidation(string property) {
         foreach (var value in new string?[] { null, "", " " }) {

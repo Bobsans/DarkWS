@@ -13,13 +13,22 @@ export interface DarkWsOptions {
   secure: boolean;
   canConnect?: () => boolean;
   beforeConnect?: () => Promise<unknown>;
+  authenticationToken?: () => string | null | undefined | Promise<string | null | undefined>;
   requestTimeout?: number;
   reconnect?: boolean;
   reconnectTimeout?: number;
+  pingInterval?: number;
+  /** @deprecated Use `pingInterval`: this value is the interval between pings, not a timeout. */
   pingTimeout?: number;
+  pongTimeout?: number;
   waitConnectionTimeout?: number;
   debug?: boolean;
 }
+
+// crypto.randomUUID exists only in secure contexts; getRandomValues also works on plain http pages.
+const createId = (): string => typeof crypto.randomUUID === "function"
+  ? crypto.randomUUID()
+  : Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("");
 
 export interface DarkWsRequest<TPayload = unknown> {
   id: string;
@@ -92,13 +101,16 @@ export default class DarkWs {
   private controlRequest?: RequestResolver;
   private readonly connectionWaiters = new Set<ConnectionWaiter>();
   private readonly options: Required<Pick<DarkWsOptions,
-    "reconnect" | "reconnectTimeout" | "requestTimeout" | "pingTimeout" |
+    "reconnect" | "reconnectTimeout" | "requestTimeout" | "pongTimeout" |
     "waitConnectionTimeout" | "debug">> & DarkWsOptions;
+  private readonly pingInterval: number;
   private socket?: WebSocket;
   private reconnectAttempts = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private pingTimer?: ReturnType<typeof setTimeout>;
+  private pongTimer?: ReturnType<typeof setTimeout>;
   private connecting = false;
+  private ready = false;
   private closedByClient = false;
   private disposed = false;
 
@@ -107,11 +119,12 @@ export default class DarkWs {
       reconnect: true,
       reconnectTimeout: 5000,
       requestTimeout: 300000,
-      pingTimeout: 30000,
+      pongTimeout: 30000,
       waitConnectionTimeout: 30000,
       debug: false,
       ...options,
     };
+    this.pingInterval = options.pingInterval ?? options.pingTimeout ?? 30000;
   }
 
   public get closing(): boolean {
@@ -133,6 +146,13 @@ export default class DarkWs {
   public connect(): this {
     this.assertNotDisposed();
     this.closedByClient = false;
+    // An open or opening socket is kept; close() or reconnect() replaces it deliberately.
+    if (this.socket && (
+      this.socket.readyState === WebSocket.OPEN ||
+      this.socket.readyState === WebSocket.CONNECTING
+    )) {
+      return this;
+    }
     if (this.options.beforeConnect) {
       if (!this.connecting) {
         this.connecting = true;
@@ -189,7 +209,7 @@ export default class DarkWs {
   ): Promise<TResult> {
     this.assertNotDisposed();
     const request: DarkWsRequest<TPayload> = {
-      id: crypto.randomUUID(),
+      id: createId(),
       action,
       ...(payload === undefined ? {} : { data: payload }),
     };
@@ -213,24 +233,29 @@ export default class DarkWs {
     return this.systemRequest("logout", "logout");
   }
 
-  private systemRequest(action: string, text: string): Promise<void> {
+  private systemRequest(action: string, text: string, socket?: WebSocket): Promise<void> {
     this.assertNotDisposed();
-    const previous = this.controlTail;
+    // Session restore on a new socket runs before queued commands, so it cannot join their chain.
+    const previous = socket ? Promise.resolve() : this.controlTail;
     const result = new Promise<void>((resolve, reject) => {
       const resolver: RequestResolver = {
-        request: { id: crypto.randomUUID(), action },
+        request: { id: createId(), action },
         control: true,
         resolve: () => resolve(),
         reject,
       };
       this.requests.set(resolver.request.id, resolver);
-      void this.sendRequest(resolver, undefined, { text, previous });
+      void this.sendRequest(resolver, undefined, { text, previous, socket });
     });
-    this.controlTail = result.catch(() => {});
+    if (!socket) this.controlTail = result.catch(() => {});
     return result;
   }
 
   public close(code = 1000): void {
+    // Browsers accept only these codes and throw InvalidAccessError otherwise; check before any state changes.
+    if (code !== 1000 && !(Number.isInteger(code) && code >= 3000 && code <= 4999)) {
+      throw new RangeError("Close code must be 1000 or an integer from 3000 to 4999");
+    }
     this.closedByClient = true;
     this.clearReconnectTimer();
     this.clearPingTimer();
@@ -238,7 +263,7 @@ export default class DarkWs {
     if (!this.socket || this.socket.readyState === WebSocket.CLOSED) {
       return;
     }
-    this.socket.close(code, DarkWs.closeReasons[code] ?? "");
+    this.socket.close(code, code === 1000 ? "Normal closure" : "");
   }
 
   public dispose(): void {
@@ -252,7 +277,7 @@ export default class DarkWs {
     this.rejectConnectionWaiters(new ConnectionClosedError("DarkWs client was disposed"));
     this.rejectAll(new ConnectionClosedError("DarkWs client was disposed"));
     if (this.socket && this.socket.readyState !== WebSocket.CLOSED) {
-      this.socket.close(1000, DarkWs.closeReasons[1000]);
+      this.socket.close(1000, "Normal closure");
     }
     this.socket = undefined;
   }
@@ -279,7 +304,6 @@ export default class DarkWs {
     this.clearReconnectTimer();
     const previous = this.socket;
     this.clearPingTimer();
-    this.clearPingTimer();
     if (previous) {
       this.socket = undefined;
       this.rejectRequestsFor(previous);
@@ -288,25 +312,19 @@ export default class DarkWs {
 
     const socket = new WebSocket(this.buildUrl());
     this.socket = socket;
+    this.ready = false;
     socket.addEventListener("open", (event) => {
       if (socket !== this.socket) return;
       this.reconnectAttempts = 0;
       this.clearPingTimer();
       this.schedulePing();
-      for (const waiter of this.connectionWaiters) {
-        clearTimeout(waiter.timeout);
-        waiter.resolve(socket);
-      }
-      this.connectionWaiters.clear();
-      this.emit("open", event);
+      const provider = this.options.authenticationToken;
+      if (provider) void this.restoreSession(socket, event, provider);
+      else this.markReady(socket, event);
     });
     socket.addEventListener("error", (event) => this.emit("error", event));
     socket.addEventListener("close", (event) => {
-      const isCurrent = socket === this.socket;
-      if (isCurrent) this.clearPingTimer();
-      if (isCurrent && !this.closedByClient && !this.disposed) {
-        this.scheduleReconnect();
-      }
+      if (socket === this.socket) this.lost();
       this.rejectRequestsFor(socket);
       this.emit("close", event);
     });
@@ -328,11 +346,33 @@ export default class DarkWs {
     return `${protocol}://${host}/${path}${query ? `?${query}` : ""}`;
   }
 
+  // Queued requests are released only after the new socket carries the session, so none precedes auth.
+  private async restoreSession(socket: WebSocket, event: Event, provider: NonNullable<DarkWsOptions["authenticationToken"]>): Promise<void> {
+    try {
+      const token = await provider();
+      if (token) await this.systemRequest("auth", "auth:" + token, socket);
+    } catch (error) {
+      if (socket !== this.socket || socket.readyState !== WebSocket.OPEN) return;
+      this.rejectConnectionWaiters(error instanceof Error ? error : new Error(String(error)));
+    }
+    if (socket === this.socket && socket.readyState === WebSocket.OPEN) this.markReady(socket, event);
+  }
+
+  private markReady(socket: WebSocket, event: Event): void {
+    this.ready = true;
+    for (const waiter of this.connectionWaiters) {
+      clearTimeout(waiter.timeout);
+      waiter.resolve(socket);
+    }
+    this.connectionWaiters.clear();
+    this.emit("open", event);
+  }
+
   private async waitForConnection(): Promise<WebSocket> {
     this.assertNotDisposed();
     if (this.closedByClient) throw new ConnectionClosedError("WebSocket connection was closed by the client");
     if (this.closed) this.connect();
-    if (this.socket?.readyState === WebSocket.OPEN) {
+    if (this.ready && this.socket?.readyState === WebSocket.OPEN) {
       return this.socket;
     }
     return new Promise<WebSocket>((resolve, reject) => {
@@ -356,9 +396,9 @@ export default class DarkWs {
     this.connectionWaiters.clear();
   }
 
-  private async sendRequest(resolver: RequestResolver, timeoutMs?: number, control?: { text: string; previous: Promise<void> }): Promise<void> {
+  private async sendRequest(resolver: RequestResolver, timeoutMs?: number, control?: { text: string; previous: Promise<void>; socket?: WebSocket }): Promise<void> {
     try {
-      const socket = await this.waitForConnection();
+      const socket = control?.socket ?? await this.waitForConnection();
       resolver.socket = socket;
       if (control) await control.previous;
       if (!this.requests.has(resolver.request.id)) return;
@@ -394,6 +434,7 @@ export default class DarkWs {
 
   private handleMessage(event: MessageEvent): void {
     if (event.data === "pong") {
+      this.clearPongTimer();
       return;
     }
     if (event.data === "auth:success" || event.data === "auth:failed" || event.data === "logout:success") {
@@ -457,8 +498,34 @@ export default class DarkWs {
     this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
-      this.connect();
+      try {
+        this.connect();
+      } catch (error) {
+        // A failing query() or WebSocket constructor must not end reconnecting: try again later.
+        this.debug("Reconnect failed", error);
+        this.scheduleReconnect();
+      }
     }, delay);
+  }
+
+  // The current socket is gone: reconnect, or fail waiters at once when nothing would open another socket.
+  private lost(): void {
+    this.clearPingTimer();
+    if (this.closedByClient || this.disposed) return;
+    if (this.options.reconnect) this.scheduleReconnect();
+    else this.rejectConnectionWaiters(new ConnectionClosedError("WebSocket connection closed and reconnect is disabled"));
+  }
+
+  // A missing pong reveals a half-open connection that readyState still reports as open.
+  private pongTimedOut(socket: WebSocket): void {
+    this.pongTimer = undefined;
+    if (socket !== this.socket) return;
+    this.debug("Pong timeout");
+    this.socket = undefined;
+    this.ready = false;
+    this.rejectRequestsFor(socket);
+    socket.close(1000, "Pong timeout");
+    this.lost();
   }
 
   private getReconnectDelay(): number {
@@ -478,19 +545,31 @@ export default class DarkWs {
 
   private schedulePing(): void {
     this.pingTimer = setTimeout(() => {
-      if (this.socket?.readyState === WebSocket.OPEN) {
-        this.socket.send("ping");
+      const socket = this.socket;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send("ping");
+        if (this.options.pongTimeout > 0 && this.pongTimer === undefined) {
+          this.pongTimer = setTimeout(() => this.pongTimedOut(socket), this.options.pongTimeout);
+        }
       }
       if (!this.disposed && this.connected && !this.closedByClient) {
         this.schedulePing();
       }
-    }, this.options.pingTimeout);
+    }, this.pingInterval);
   }
 
   private clearPingTimer(): void {
     if (this.pingTimer !== undefined) {
       clearTimeout(this.pingTimer);
       this.pingTimer = undefined;
+    }
+    this.clearPongTimer();
+  }
+
+  private clearPongTimer(): void {
+    if (this.pongTimer !== undefined) {
+      clearTimeout(this.pongTimer);
+      this.pongTimer = undefined;
     }
   }
 
@@ -522,19 +601,4 @@ export default class DarkWs {
       console.debug(DarkWs.LOG_PREFIX, ...args);
     }
   }
-
-  private static readonly closeReasons: Record<number, string> = {
-    1000: "Normal closure",
-    1001: "Going away",
-    1002: "Protocol error",
-    1003: "Unsupported data",
-    1005: "No status received",
-    1006: "Abnormal closure",
-    1007: "Invalid frame payload data",
-    1008: "Policy violation",
-    1009: "Message too big",
-    1010: "Mandatory extension",
-    1011: "Internal server error",
-    1015: "TLS handshake",
-  };
 }

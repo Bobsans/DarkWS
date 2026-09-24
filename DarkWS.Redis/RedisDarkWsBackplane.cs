@@ -22,7 +22,8 @@ internal sealed class RedisDarkWsBackplane(
     ) {
         ArgumentNullException.ThrowIfNull(message);
         cancellationToken.ThrowIfCancellationRequested();
-        var json = JsonSerializer.Serialize(message, _jsonOptions);
+        // UTF-8 bytes go to Redis as they are, without a UTF-16 string in between.
+        var json = JsonSerializer.SerializeToUtf8Bytes(message, _jsonOptions);
         await connection.GetSubscriber().PublishAsync(_channel, json);
     }
 
@@ -69,7 +70,7 @@ internal sealed class RedisDarkWsBackplane(
     private async Task HandleMessageAsync(ChannelMessage message, Func<DarkWsBroadcast, CancellationToken, ValueTask> listener, CancellationToken cancellationToken) {
         try {
             cancellationToken.ThrowIfCancellationRequested();
-            var broadcast = JsonSerializer.Deserialize<DarkWsBroadcast>(message.Message.ToString(), _jsonOptions);
+            var broadcast = JsonSerializer.Deserialize<DarkWsBroadcast>((byte[])message.Message!, _jsonOptions);
             if (broadcast is not null) {
                 await listener(broadcast, cancellationToken);
             }

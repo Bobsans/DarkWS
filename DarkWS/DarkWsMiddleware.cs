@@ -13,6 +13,6 @@ public abstract class DarkWsMiddleware {
         IDarkWsSession? previousSession
     ) => Task.CompletedTask;
 
-    /// <summary>Runs after removal from storage. Finish promptly and observe cancellation to allow resource cleanup.</summary>
+    /// <summary>Runs after removal from storage. The context's ConnectionAborted is the ShutdownTimeout deadline shared with the close handshake; finish promptly.</summary>
     public virtual Task OnCloseAsync(IDarkWsContextAccessor context) => Task.CompletedTask;
 }

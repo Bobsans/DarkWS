@@ -70,6 +70,16 @@ public sealed class RedisBackplaneTests {
     }
 
     [Test]
+    public void RepeatedRegistrationIsRejected() {
+        var services = new ServiceCollection();
+        services.AddDarkWsRedis("first");
+
+        var error = Assert.Throws<InvalidOperationException>(() => services.AddDarkWsRedis("second"))!;
+
+        Assert.That(error.Message, Does.Contain("AddDarkWsRedis"));
+    }
+
+    [Test]
     public void NullListenerIsRejected() {
         var channel = $"darkws-test:{Guid.NewGuid():N}";
         using var provider = CreateProvider(channel);
@@ -95,16 +105,25 @@ public sealed class RedisBackplaneTests {
     public async Task UnsubscribeStopsDeliveryAsync() {
         var channel = $"darkws-test:{Guid.NewGuid():N}";
         await using var provider = CreateProvider(channel);
+        await using var controlProvider = CreateProvider(channel);
         var backplane = provider.GetRequiredService<IDarkWsBackplane>();
+        var control = controlProvider.GetRequiredService<IDarkWsBackplane>();
         var count = 0;
+        var delivered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await backplane.SubscribeAsync((_, _) => {
             Interlocked.Increment(ref count);
             return ValueTask.CompletedTask;
         });
+        await control.SubscribeAsync((_, _) => { delivered.TrySetResult(); return ValueTask.CompletedTask; });
         await backplane.UnsubscribeAsync();
 
-        await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "ignored", null));
-        await Task.Delay(100);
+        try {
+            await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "ignored", null));
+            // The control subscriber on the same channel proves the message went through Redis.
+            await delivered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        } finally {
+            await control.UnsubscribeAsync();
+        }
 
         Assert.That(count, Is.Zero);
     }

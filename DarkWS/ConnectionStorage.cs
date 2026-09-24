@@ -9,10 +9,12 @@ public sealed class ConnectionStorage {
     private readonly Dictionary<string, HashSet<string>> _sessions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, HashSet<string>> _groups = new(StringComparer.Ordinal);
 
-    /// <summary>Adds or replaces a connection by id and refreshes its session/group indexes.</summary>
+    /// <summary>Adds or replaces an open connection by id and refreshes its session/group indexes. A closed connection is ignored.</summary>
     public IWebSocketConnection Add(IWebSocketConnection connection) {
         ArgumentNullException.ThrowIfNull(connection);
         lock (_sync) {
+            // A refresh racing with shutdown must not re-register a connection that was already removed.
+            if (!connection.IsOpen) return connection;
             var entry = new Entry(connection, connection.Session?.Id, connection.Session?.Groups.Distinct(StringComparer.Ordinal).ToArray() ?? []);
             if (_connections.Remove(connection.Id, out var previous)) RemoveIndexes(previous);
             _connections.Add(connection.Id, entry);

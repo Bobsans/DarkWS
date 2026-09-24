@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # Actions are pinned to commit SHAs; Dependabot updates the SHA and its version comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # Minimum versions of the published libraries are deliberate; CI tests newer Redis clients separately.
+      - dependency-name: StackExchange.Redis
+      - dependency-name: Microsoft.Extensions.DependencyInjection.Abstractions
+        update-types: ["version-update:semver-major"]
+      # Each target framework pins its own major version.
+      - dependency-name: Microsoft.AspNetCore.Mvc.Testing
+        update-types: ["version-update:semver-major"]
+    groups:
+      nuget-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /packages/darkws
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]

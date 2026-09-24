@@ -22,4 +22,6 @@ public interface IWebSocketConnection : IDisposable {
     Task SendAsync(byte[] data, CancellationToken cancellationToken = default);
     /// <summary>Stops new writes and performs graceful close. Supply cancellation to bound the close handshake.</summary>
     Task CloseAsync(CancellationToken cancellationToken = default);
+    /// <summary>Aborts the transport immediately, for example after a broadcast timeout. Transportless implementations override it.</summary>
+    void Abort() => WebSocket.Abort();
 }

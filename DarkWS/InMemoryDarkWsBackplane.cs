@@ -9,8 +9,10 @@ internal sealed class InMemoryDarkWsBackplane : IDarkWsBackplane {
         DarkWsBroadcast message,
         CancellationToken cancellationToken = default
     ) {
+        if (cancellationToken.IsCancellationRequested) return ValueTask.FromCanceled(cancellationToken);
         var listener = Volatile.Read(ref _listener);
-        return listener is null ? ValueTask.CompletedTask : listener(message, cancellationToken);
+        // The publisher's token must not cancel writes to other connections once delivery has started.
+        return listener is null ? ValueTask.CompletedTask : listener(message, CancellationToken.None);
     }
 
     public ValueTask SubscribeAsync(

@@ -11,9 +11,9 @@ public abstract class HandlerBase {
     /// <summary>Gets the required handler session. Throws InvalidOperationException for an anonymous connection or incompatible typed session.</summary>
     protected IDarkWsSession Session => Context.Session
         ?? throw new InvalidOperationException("This handler requires an authenticated session");
-    /// <summary>Gets the HTTP upgrade context shared by the connection.</summary>
+    /// <summary>Gets the HTTP upgrade context shared by the connection. Not thread-safe: concurrent actions of the connection share it.</summary>
     protected HttpContext HttpContext => Context.HttpContext;
-    /// <summary>Gets ASP.NET session state when its middleware is installed, otherwise null.</summary>
+    /// <summary>Gets ASP.NET session state when its middleware is installed, otherwise null. Not thread-safe: concurrent actions of the connection share it.</summary>
     protected ISession? AspNetSession => Context.AspNetSession;
     /// <summary>Gets the current connection during initialized message handling.</summary>
     protected IWebSocketConnection Connection => Context.Connection;

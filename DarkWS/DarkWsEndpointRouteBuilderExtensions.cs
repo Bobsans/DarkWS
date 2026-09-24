@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using DarkWS.Abstractions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -33,9 +34,8 @@ public static class DarkWsEndpointRouteBuilderExtensions {
             var token = context.Request.Query[options.AuthenticationQueryParameter].FirstOrDefault();
             var authenticator = context.RequestServices.GetRequiredService<IDarkWsAuthenticator>();
             var session = await authenticator.AuthenticateAsync(context, token, cancellation.Token);
-            if (session is not null) {
-                context.User = session.User;
-            }
+            // HttpContext.User follows the authenticator's decision, as it does after auth:/logout.
+            context.User = session?.User ?? new ClaimsPrincipal(new ClaimsIdentity());
 
             var socket = await context.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext {
                 KeepAliveInterval = options.KeepAliveInterval,

@@ -15,7 +15,11 @@ internal sealed class DarkWsActionRegistry {
         if (type.GetCustomAttributes(inherit: true).OfType<IAuthorizeData>().Any()) {
             throw new InvalidOperationException($"Handler '{type.FullName}' uses unsupported [Authorize] metadata. DarkWS supports only [AllowAnonymous]; enforce policies and roles inside actions");
         }
-        var handlerName = type.GetCustomAttribute<HandlerAttribute>()?.Name;
+        var handler = type.GetCustomAttribute<HandlerAttribute>();
+        if (handler is not null && !IsValidName(handler.Name)) {
+            throw new InvalidOperationException($"Handler '{type.FullName}' has invalid name '{handler.Name}'; names must be non-empty without surrounding whitespace");
+        }
+        var handlerName = handler?.Name;
         var classAllowsAnonymous = type.GetCustomAttribute<AllowAnonymousAttribute>() is not null;
 
         foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)) {
@@ -33,6 +37,7 @@ internal sealed class DarkWsActionRegistry {
                 : parameters.Length > 1 ? "must have zero or one payload parameter"
                 : parameters.Any(parameter => parameter.ParameterType.IsByRef || parameter.ParameterType.IsByRefLike || parameter.ParameterType.IsPointer || parameter.ParameterType.IsFunctionPointer) ? "payload must not be by-reference, byref-like, or a pointer"
                 : method.ReturnType != typeof(IResponse) && method.ReturnType != typeof(Task<IResponse>) ? "must return IResponse or Task<IResponse>"
+                : !IsValidName(action.Name) ? $"has invalid action name '{action.Name}'; names must be non-empty without surrounding whitespace"
                 : null;
             if (reason is not null) {
                 throw new InvalidOperationException($"Action method '{type.FullName}.{method.Name}' {reason}");
@@ -47,6 +52,9 @@ internal sealed class DarkWsActionRegistry {
             _actions.Add(key, CreateDescriptor(type, method, parameters.FirstOrDefault()?.ParameterType, allowAnonymous));
         }
     }
+
+    // A blank action is rejected as an invalid request, so it could never be reached; padding is almost always a typo.
+    private static bool IsValidName(string? name) => !string.IsNullOrWhiteSpace(name) && name.Trim() == name;
 
     private static ActionDescriptorBase CreateDescriptor(
         Type handlerType,

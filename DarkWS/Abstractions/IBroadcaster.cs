@@ -1,6 +1,6 @@
 namespace DarkWS.Abstractions;
 
-/// <summary>Publishes notifications through the configured backplane. Recipients share an immutable envelope with id @.</summary>
+/// <summary>Publishes notifications through the configured backplane. Recipients share an immutable envelope with id @. Cancellation stops publishing, not delivery that has started.</summary>
 public interface IBroadcaster {
     /// <summary>Publishes an action and optional data to all connections through the backplane.</summary>
     Task BroadcastAsync(string action, CancellationToken cancellationToken = default);

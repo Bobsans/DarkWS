@@ -22,8 +22,10 @@ assumes an anonymous action returning `{ "value": 30 }`.
 
 Use `RequestAsync("action", payload, ct)` for actions without a result: it still
 waits for acknowledgement and checks server errors. Omitting payload omits its
-wire `data` property; `(object?)null` sends explicit JSON null. Typed requests require a
-`data` field. JSON null follows System.Text.Json rules; nullable reference
+wire `data` property; `(object?)null` sends explicit JSON null. Typed requests and
+`On<T>` subscriptions require a `data` field; the DarkWS server always writes it
+for data results and broadcasts, as JSON null for a null value, which becomes
+`default`. JSON null follows System.Text.Json rules; nullable reference
 annotations do not enforce runtime validation. Use `JsonElement` for dynamic
 results; returned elements remain valid after receive buffers are released.
 
@@ -77,7 +79,9 @@ Authentication sends text `auth:<token>` and waits for `auth:success`; rejection
 and an empty request id. Logout sends `logout` and waits for `logout:success`.
 These commands run sequentially. A response timeout or cancellation while a command
 is in flight discards the socket, preventing a late reply from completing a later
-command. Manual authentication does not retain the token for reconnect.
+command; a command cancelled or timed out while still queued behind other writes
+was never sent, so the socket stays in use. Manual authentication does not retain
+the token for reconnect.
 To restore the application session on each fresh socket:
 
 ```csharp
@@ -108,20 +112,26 @@ restore the old HTTP identity. Logout does not roll back running server actions.
 - `ConnectAsync` joins one shared connection attempt. Caller cancellation stops
   only that caller's wait. Connection attempts continue until close/disposal or
   a permanent failure.
-- Transport failures reconnect with exponential jitter up to 30 seconds. Sent
+- Transport failures reconnect with exponential jitter up to 30 seconds, including a
+  drop or timeout while automatic authentication waits for `auth:success`. Sent
   requests fail and are never replayed. New requests during recovery await readiness.
-- Credentials rejected by the server, HTTP 401/403, wire errors, and notification
-  overflow stop automatic retry. Correct the cause and call `ConnectAsync`.
+- Credentials rejected by the server (`auth:failed`), a failing or empty token
+  provider, a failing socket configuration callback, HTTP 401/403, wire errors, and
+  notification overflow stop automatic retry. Correct the cause and call `ConnectAsync`.
 - `CloseAsync` stops recovery and rejects waiters. Requests fail until explicit
-  `ConnectAsync`. Disposal is terminal and idempotent. `DisposeAsync` awaits network
-  cleanup; `Dispose` aborts immediately for ordinary container disposal.
+  `ConnectAsync`. Disposal is terminal and idempotent. `DisposeAsync` first closes an
+  open connection gracefully, taking up to `CloseTimeout` (a connection attempt or an
+  already running close is interrupted), then awaits network cleanup; `Dispose` aborts
+  immediately for ordinary container disposal.
 - Cancelling/timing out a request does not undo server work. Once a write starts,
   caller cancellation does not cancel the shared socket. A transport write timeout
   aborts the connection and fails its remaining requests.
 - `DarkWsResponseException` exposes `Code`, `Action`, `RequestId`, and optional
   `ErrorData`. Timeout exceptions expose Connection, Send, or Response in `Stage`.
   Connection, protocol, and capacity failures have corresponding DarkWs exception
-  types. Payload/result conversion uses `JsonException`.
+  types; a transport failure message names the cause chain by exception type and
+  error code (for example `SocketError.ConnectionRefused`), never by its text, which
+  could contain the endpoint's query token. Payload/result conversion uses `JsonException`.
 - Observe `StateChanged` and `Error` for background failures. Request failures are
   returned through their tasks. Event observers run off the socket/UI context;
   keep them short. Exceptions in `Error` observers are contained.

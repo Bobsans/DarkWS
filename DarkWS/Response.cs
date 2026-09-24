@@ -19,11 +19,13 @@ public sealed class ResponseContext(
 
     /// <summary>Serializes data using configured JSON options and sends it to the requesting connection.</summary>
     public Task SendAsync<T>(T data, CancellationToken cancellationToken = default) {
-        return _connection.SendAsync(
-            JsonSerializer.SerializeToUtf8Bytes(data, _options.JsonOptions),
-            cancellationToken
-        );
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(data, _options.JsonOptions);
+        HasStarted = true;
+        return _connection.SendAsync(bytes, cancellationToken);
     }
+
+    // False until serialized bytes reach the connection, so an earlier failure can still be answered with an error.
+    internal bool HasStarted { get; private set; }
 }
 
 /// <summary>Writes one action result using a correlation context and cancellation token.</summary>

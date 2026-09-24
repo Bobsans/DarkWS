@@ -6,25 +6,27 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: release-${{ github.event.release.tag_name }}
   cancel-in-progress: false
 
 jobs:
-  publish:
+  # Dependencies and tests run here without the OIDC permission; publish only receives the packed artifacts.
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: release
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      npm_tag: ${{ steps.version.outputs.npm_tag }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.release.tag_name }}
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
           dotnet-version: |
@@ -32,10 +34,9 @@ jobs:
             9.0.x
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
 
       - name: Install browser package dependencies
         run: npm ci --prefix packages/darkws
@@ -62,32 +63,49 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "npm_tag=$(if ($isPrerelease) { 'next' } else { 'latest' })" >> $env:GITHUB_OUTPUT
 
+      # The gate packs, inspects, and installs the packages; exactly those files are published.
       - name: Run tests and coverage gates
         shell: pwsh
+        env:
+          DARKWS_PACKAGE_OUTPUT: ${{ github.workspace }}/artifacts
         run: ./scripts/test-coverage.ps1
 
-      - name: Pack packages
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path artifacts | Out-Null
-          dotnet pack DarkWS/DarkWS.csproj -c Release --no-restore -o artifacts
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet pack DarkWS.Redis/DarkWS.Redis.csproj -c Release --no-restore -o artifacts
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet pack DarkWS.Client/DarkWS.Client.csproj -c Release --no-restore -o artifacts
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet pack DarkWS.Client.DependencyInjection/DarkWS.Client.DependencyInjection.csproj -c Release --no-restore -o artifacts
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Push-Location packages/darkws
-          try {
-              npm pack --pack-destination ../../artifacts
-              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          } finally {
-              Pop-Location
-          }
+      - name: Upload verified packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-packages
+          path: artifacts/*
+          if-no-files-found: error
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Download verified packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-packages
+          path: artifacts
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
 
       - name: Authenticate to NuGet.org
-        uses: NuGet/login@v1
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         id: nuget
         with:
           user: ${{ vars.NUGET_USER }}
@@ -106,15 +124,15 @@ jobs:
           }
 
       - name: Publish npm package
-        working-directory: packages/darkws
         shell: pwsh
         env:
-          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
-          NPM_TAG: ${{ steps.version.outputs.npm_tag }}
+          PACKAGE_VERSION: ${{ needs.verify.outputs.version }}
+          NPM_TAG: ${{ needs.verify.outputs.npm_tag }}
         run: |
           $published = npm view "darkws@$env:PACKAGE_VERSION" version 2>$null
           if ($LASTEXITCODE -eq 0 -and $published.Trim() -eq $env:PACKAGE_VERSION) {
               Write-Host "darkws@$env:PACKAGE_VERSION is already published"
               exit 0
           }
-          npm publish --tag $env:NPM_TAG
+          # Publishing the verified tarball runs no package scripts and rebuilds nothing.
+          npm publish "artifacts/darkws-$env:PACKAGE_VERSION.tgz" --tag $env:NPM_TAG

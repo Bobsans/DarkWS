@@ -371,6 +371,72 @@ describe("DarkWs", () => {
     client.dispose();
   });
 
+  it("restores the session before releasing requests on every socket", async () => {
+    let token = "first";
+    const client = createClient({ authenticationToken: async () => token }).connect();
+    const socket = MockWebSocket.instances[0];
+    const queued = client.request<number>("queued");
+    socket.open();
+    const late = client.request<number>("late");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.sent).toEqual(["auth:first"]);
+    socket.serverText("auth:success");
+    await vi.advanceTimersByTimeAsync(0);
+    const [first, second] = socket.sent.slice(1).map(value => JSON.parse(value as string));
+    expect([first.action, second.action]).toEqual(["queued", "late"]);
+    socket.serverMessage({ id: first.id, data: 1 });
+    socket.serverMessage({ id: second.id, data: 2 });
+    await expect(Promise.all([queued, late])).resolves.toEqual([1, 2]);
+
+    token = "second";
+    socket.serverClose();
+    const reconnecting = client.request<number>("after-reconnect");
+    await vi.advanceTimersByTimeAsync(200);
+    const next = MockWebSocket.instances[1];
+    next.open();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(next.sent).toEqual(["auth:second"]);
+    next.serverText("auth:success");
+    await vi.advanceTimersByTimeAsync(0);
+    const request = JSON.parse(next.sent[1] as string);
+    expect(request.action).toBe("after-reconnect");
+    next.serverMessage({ id: request.id, data: 3 });
+    await expect(reconnecting).resolves.toBe(3);
+    client.dispose();
+  });
+
+  it("rejects queued requests when session restore fails and continues without a session", async () => {
+    const client = createClient({ authenticationToken: () => "expired" }).connect();
+    const socket = MockWebSocket.instances[0];
+    const opened = vi.fn();
+    client.on("open", opened);
+    const queued = expect(client.request("queued")).rejects.toMatchObject({ message: "auth:failed" });
+    socket.open();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(opened).not.toHaveBeenCalled();
+    socket.serverText("auth:failed");
+    await queued;
+    expect(opened).toHaveBeenCalledTimes(1);
+    const anonymous = expect(client.request("public")).rejects.toBeInstanceOf(ConnectionClosedError);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(JSON.parse(socket.sent[1] as string).action).toBe("public");
+    client.dispose();
+    await anonymous;
+  });
+
+  it("connects without authentication when the provider has no token", async () => {
+    const client = createClient({ authenticationToken: () => undefined }).connect();
+    const socket = MockWebSocket.instances[0];
+    const request = client.request<number>("public");
+    socket.open();
+    await vi.advanceTimersByTimeAsync(0);
+    const sent = JSON.parse(socket.sent[0] as string);
+    expect(sent.action).toBe("public");
+    socket.serverMessage({ id: sent.id, data: 7 });
+    await expect(request).resolves.toBe(7);
+    client.dispose();
+  });
+
   it("builds a URL without an empty question mark", () => {
     const client = createClient().connect();
     expect(MockWebSocket.instances[0].url).toBe("ws://example.test/ws");
@@ -470,13 +536,101 @@ describe("DarkWs", () => {
     client.dispose();
   });
 
-  it("ignores pong control messages", () => {
-    const client = createClient().connect();
+  it("treats a text pong as a heartbeat reply, not a message", async () => {
+    const client = createClient({ pingInterval: 100, pongTimeout: 50 }).connect();
     const listener = vi.fn();
     client.on("message", listener);
-    MockWebSocket.instances[0].serverMessage("pong");
-
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    for (let ping = 0; ping < 3; ping++) {
+      await vi.advanceTimersByTimeAsync(100);
+      socket.serverText("pong");
+    }
+    await vi.advanceTimersByTimeAsync(60);
     expect(listener).not.toHaveBeenCalled();
+    expect(socket.readyState).toBe(MockWebSocket.OPEN);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    client.dispose();
+  });
+
+  it("drops a socket whose pong does not arrive and reconnects", async () => {
+    const client = createClient({ pingInterval: 100, pongTimeout: 50 }).connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    const pending = expect(client.request("pending")).rejects.toBeInstanceOf(ConnectionClosedError);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(socket.sent.at(-1)).toBe("ping");
+    await vi.advanceTimersByTimeAsync(50);
+    await pending;
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(MockWebSocket.instances).toHaveLength(2);
+    client.dispose();
+  });
+
+  it("keeps reconnecting when query() throws in the reconnect timer", async () => {
+    let failing = false;
+    const client = createClient({ query: () => { if (failing) throw new Error("token storage unavailable"); return {}; } }).connect();
+    MockWebSocket.instances[0].open();
+    failing = true;
+    MockWebSocket.instances[0].serverClose();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    failing = false;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(MockWebSocket.instances).toHaveLength(2);
+    client.dispose();
+  });
+
+  it("keeps an open socket when connect() is called again", async () => {
+    const client = createClient().connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    const request = client.request<number>("pending");
+    await vi.advanceTimersByTimeAsync(0);
+    client.connect();
+    expect(MockWebSocket.instances).toHaveLength(1);
+    socket.serverMessage({ id: JSON.parse(socket.sent[0] as string).id, data: 5 });
+    await expect(request).resolves.toBe(5);
+    client.dispose();
+  });
+
+  it("refuses close codes that browsers reject before changing state", async () => {
+    const client = createClient().connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    expect(() => client.close(1001)).toThrow(RangeError);
+    expect(() => client.close(3000.5)).toThrow(RangeError);
+    const request = client.request<number>("still-open");
+    await vi.advanceTimersByTimeAsync(0);
+    socket.serverMessage({ id: JSON.parse(socket.sent[0] as string).id, data: 1 });
+    await expect(request).resolves.toBe(1);
+    client.close(4000);
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED);
+    client.dispose();
+  });
+
+  it("creates request ids without crypto.randomUUID outside secure contexts", async () => {
+    const real = globalThis.crypto;
+    vi.stubGlobal("crypto", { getRandomValues: real.getRandomValues.bind(real) });
+    const client = createClient().connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    const request = client.request("insecure");
+    await vi.advanceTimersByTimeAsync(0);
+    const sent = JSON.parse(socket.sent[0] as string);
+    expect(sent.id).toMatch(/^[0-9a-f]{32}$/);
+    socket.serverMessage({ id: sent.id });
+    await expect(request).resolves.toBeUndefined();
+    client.dispose();
+  });
+
+  it("rejects connection waiters at once when the socket closes without reconnect", async () => {
+    const client = createClient({ reconnect: false }).connect();
+    const waiting = expect(client.request("waiting")).rejects.toBeInstanceOf(ConnectionClosedError);
+    MockWebSocket.instances[0].serverClose(false, 1006);
+    await waiting;
+    expect(vi.getTimerCount()).toBe(0);
     client.dispose();
   });
 

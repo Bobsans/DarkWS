@@ -8,6 +8,19 @@ public sealed partial class DarkWsClient {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     private async Task ReceiveAsync(Connection connection) {
+        try { await ReadMessagesAsync(connection).ConfigureAwait(false); }
+        catch (Exception exception) when (!connection.Token.IsCancellationRequested) {
+            // No reply can arrive any more: fail waiters now, not at their timeouts. A dropped socket also cancels
+            // connect-time authentication. Wire and capacity errors keep the token so the cycle still classifies
+            // them as terminal and sends the close status.
+            var failure = connection.Failure ?? SafeFailure(exception);
+            if (failure is DarkWsProtocolException or DarkWsClientLimitException) connection.FailRequests(failure);
+            else connection.Fail(failure);
+            throw;
+        }
+    }
+
+    private async Task ReadMessagesAsync(Connection connection) {
         var buffer = new byte[Math.Min(8192, _options.MaxMessageSizeBytes)];
         while (!connection.Token.IsCancellationRequested) {
             using var message = new MemoryStream();

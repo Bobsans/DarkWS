@@ -29,8 +29,14 @@ public static class Utils {
     public static async Task<byte[]> ReceiveRawMessage(this WebSocket webSocket) {
         var buffer = ArrayPool<byte>.Shared.Rent(4096);
         try {
-            var result = await webSocket.ReceiveAsync(buffer, CancellationToken.None);
-            return buffer.AsSpan(0, result.Count).ToArray();
+            // A message larger than the buffer arrives in several reads.
+            using var message = new MemoryStream();
+            WebSocketReceiveResult result;
+            do {
+                result = await webSocket.ReceiveAsync(buffer, CancellationToken.None);
+                message.Write(buffer, 0, result.Count);
+            } while (!result.EndOfMessage);
+            return message.ToArray();
         } finally {
             ArrayPool<byte>.Shared.Return(buffer);
         }

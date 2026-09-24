@@ -3,6 +3,7 @@ using System.Net.WebSockets;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using DarkWS.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -14,7 +15,6 @@ internal sealed class WebSocketHandler(
     DarkWsActionRegistry actions,
     ConnectionStorage storage,
     IBroadcaster broadcaster,
-    IDarkWsAuthenticator authenticator,
     IEnumerable<DarkWsMiddleware> middlewares,
     IOptions<DarkWsOptions> options,
     ILogger<WebSocketHandler> logger
@@ -38,37 +38,47 @@ internal sealed class WebSocketHandler(
         var tasks = new List<Task>();
         var requests = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var connectionContext = CreateContext(connection, requests.Token);
+        var queue = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_options.MaxConcurrentRequestsPerConnection) {
+            SingleReader = true,
+            SingleWriter = true
+        });
+        Task? reader = null;
 
         try {
             foreach (var middleware in middlewares) {
                 await middleware.OnOpenAsync(connectionContext);
             }
 
-            while (connection.IsOpen && !cancellationToken.IsCancellationRequested) {
-                var message = await connection.ReceiveMessageAsync(cancellationToken);
-                if (message.CloseStatus.HasValue) {
-                    break;
-                }
-
-                if (message.Data.AsSpan().SequenceEqual(_ping)) {
-                    await connection.SendAsync(_pong, cancellationToken);
-                } else if (message.Data.AsSpan().StartsWith(_auth)) {
-                    var authenticated = await AuthenticateAsync(Encoding.UTF8.GetString(message.Data.AsSpan(_auth.Length)), connection, cancellationToken);
-                    await connection.SendAsync(authenticated ? _authSuccess : _authFailed, cancellationToken);
-                } else if (message.Data.AsSpan().SequenceEqual(_logout)) {
-                    await SetSessionAsync(connection, null, cancellationToken);
-                    await connection.SendAsync(_logoutSuccess, cancellationToken);
-                } else {
-                    var input = await ReadMessageAsync(message.Data, connection, cancellationToken);
-                    if (input is null) continue;
-                    tasks.RemoveAll(it => it.IsCompleted);
-                    if (tasks.Count >= _options.MaxConcurrentRequestsPerConnection) {
-                        await Task.WhenAny(tasks).WaitAsync(cancellationToken);
-                        tasks.RemoveAll(it => it.IsCompleted);
+            reader = ReceiveAsync(connection, queue.Writer, requests, cancellationToken);
+            try {
+                // Messages are handled in arrival order; the reader cancels requests when it stops.
+                while (await queue.Reader.WaitToReadAsync(requests.Token) && queue.Reader.TryPeek(out var data)) {
+                    if (data.AsSpan().StartsWith(_auth)) {
+                        queue.Reader.TryRead(out _);
+                        var authenticated = await AuthenticateAsync(Encoding.UTF8.GetString(data.AsSpan(_auth.Length)), connection, cancellationToken);
+                        await connection.SendAsync(authenticated ? _authSuccess : _authFailed, cancellationToken);
+                    } else if (data.AsSpan().SequenceEqual(_logout)) {
+                        queue.Reader.TryRead(out _);
+                        await SetSessionAsync(connection, null, cancellationToken);
+                        await connection.SendAsync(_logoutSuccess, cancellationToken);
+                    } else {
+                        var input = await ReadMessageAsync(data, connection, cancellationToken);
+                        if (input is not null) {
+                            tasks.RemoveAll(it => it.IsCompleted);
+                            // The request keeps its queue place while waiting for a slot, so the queue bound stays exact.
+                            if (tasks.Count >= _options.MaxConcurrentRequestsPerConnection) {
+                                await Task.WhenAny(tasks).WaitAsync(requests.Token);
+                                tasks.RemoveAll(it => it.IsCompleted);
+                            }
+                            tasks.Add(ProcessMessageAsync(input, connection, requests.Token));
+                        }
+                        queue.Reader.TryRead(out _);
                     }
-                    tasks.Add(ProcessMessageAsync(input, connection, requests.Token));
                 }
+            } catch (OperationCanceledException) when (requests.IsCancellationRequested && !cancellationToken.IsCancellationRequested) {
+                // The reader stopped: the peer closed or the transport failed. Its outcome is observed below.
             }
+            await reader;
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             Log.Cancelled(logger, null);
         } catch (WebSocketException error) {
@@ -76,7 +86,53 @@ internal sealed class WebSocketHandler(
         } catch (Exception error) {
             Log.HandlerFailed(logger, error);
         } finally {
-            await ShutdownAsync(connection, connectionContext, tasks, requests);
+            await ShutdownAsync(connection, tasks, requests, reader);
+        }
+    }
+
+    // Keeps a receive pending even while every request slot is busy, so keep-alive PONGs and ping are
+    // processed under load. Everything else is queued for the dispatcher in arrival order.
+    private async Task ReceiveAsync(
+        WebSocketConnection connection,
+        ChannelWriter<byte[]> queue,
+        CancellationTokenSource requests,
+        CancellationToken cancellationToken
+    ) {
+        try {
+            while (connection.IsOpen && !cancellationToken.IsCancellationRequested) {
+                var message = await connection.ReceiveMessageAsync(cancellationToken);
+                if (message.CloseStatus.HasValue) {
+                    return;
+                }
+
+                if (message.Data.AsSpan().SequenceEqual(_ping)) {
+                    await connection.SendAsync(_pong, cancellationToken);
+                } else if (!queue.TryWrite(message.Data)) {
+                    await EnqueueAsync(message.Data, connection, queue, requests.Token);
+                }
+            }
+        } finally {
+            // Like the former single loop, a stopped reader ends dispatching and cancels running handlers.
+            requests.Cancel();
+        }
+    }
+
+    private async Task EnqueueAsync(byte[] data, IWebSocketConnection connection, ChannelWriter<byte[]> queue, CancellationToken cancellationToken) {
+        if (data.AsSpan().StartsWith(_auth) || data.AsSpan().SequenceEqual(_logout)) {
+            // Commands are rare and must keep their order, so they wait for a place.
+            await queue.WriteAsync(data, cancellationToken);
+            return;
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(_options.RequestQueueTimeout);
+        try {
+            await queue.WriteAsync(data, timeout.Token);
+        } catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) {
+            var input = await ReadMessageAsync(data, connection, cancellationToken);
+            if (input is not null) {
+                await new ErrorResponse(_options.BusyError).WriteResultAsync(new ResponseContext(connection, input.Id, _options), cancellationToken);
+            }
         }
     }
 
@@ -104,10 +160,19 @@ internal sealed class WebSocketHandler(
     }
 
     private async Task ProcessMessageAsync(InputMessage message, IWebSocketConnection connection, CancellationToken cancellationToken) {
+        var response = new ResponseContext(connection, message.Id, _options);
         try {
-            var result = await HandleMessageAsync(message, connection, cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
-            await result.WriteResultAsync(new ResponseContext(connection, message.Id, _options), cancellationToken);
+            try {
+                // The result is written inside the message scope, so deferred data can still use scoped services.
+                await using var scope = connection.HttpContext.RequestServices.CreateAsyncScope();
+                var result = await HandleMessageAsync(message, connection, scope.ServiceProvider, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                await result.WriteResultAsync(response, cancellationToken);
+            } catch (Exception error) when (!response.HasStarted && !cancellationToken.IsCancellationRequested) {
+                // Nothing was sent yet, so the stable error cannot duplicate or follow a partial result.
+                Log.ResponseFailed(logger, message.Id, error);
+                await new ErrorResponse(_options.RequestFailedError).WriteResultAsync(response, cancellationToken);
+            }
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             Log.RequestCancelled(logger, message.Id, null);
         } catch (WebSocketException error) {
@@ -120,13 +185,16 @@ internal sealed class WebSocketHandler(
     private async Task<IResponse> HandleMessageAsync(
         InputMessage message,
         IWebSocketConnection connection,
+        IServiceProvider services,
         CancellationToken cancellationToken
     ) {
         if (!actions.TryGet(message.Action, out var action)) {
             return new ErrorResponse(_options.InvalidActionError);
         }
 
-        if (!action.AllowAnonymous && connection.Session?.User.Identity?.IsAuthenticated != true) {
+        // The action keeps the session it was authorized with, even if auth:/logout arrives meanwhile.
+        var session = connection.Session;
+        if (!action.AllowAnonymous && session?.User.Identity?.IsAuthenticated != true) {
             return new ErrorResponse(_options.AuthorizationRequiredError);
         }
 
@@ -139,17 +207,17 @@ internal sealed class WebSocketHandler(
                 Log.InvalidPayload(logger, message.Action, error);
                 return new ErrorResponse(_options.InvalidRequestError);
             }
-            await using var scope = connection.HttpContext.RequestServices.CreateAsyncScope();
-            var context = scope.ServiceProvider.GetRequiredService<DarkWsContextAccessor>();
-            context.Initialize(connection, cancellationToken);
+            var context = services.GetRequiredService<DarkWsContextAccessor>();
+            context.Initialize(connection, cancellationToken, session);
 
-            foreach (var initializer in scope.ServiceProvider.GetServices<IDarkWsScopeInitializer>()) {
-                await initializer.InitializeAsync(scope.ServiceProvider, context, cancellationToken);
+            foreach (var initializer in services.GetServices<IDarkWsScopeInitializer>()) {
+                await initializer.InitializeAsync(services, context, cancellationToken);
             }
 
-            var handler = (HandlerBase)scope.ServiceProvider.GetRequiredService(action.HandlerType);
+            var handler = (HandlerBase)services.GetRequiredService(action.HandlerType);
             handler.Initialize(this, context);
-            var result = await action.InvokeAsync(handler, parameter);
+            var result = await action.InvokeAsync(handler, parameter)
+                ?? throw new InvalidOperationException($"Action {message.Action} returned no response");
             if (logger.IsEnabled(LogLevel.Debug)) Log.Completed(logger, message.Action, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, null);
             return result;
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
@@ -170,7 +238,12 @@ internal sealed class WebSocketHandler(
     ) {
         IDarkWsSession? session = null;
         try {
-            if (!string.IsNullOrWhiteSpace(token)) session = await authenticator.AuthenticateAsync(connection.HttpContext, token, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(token)) {
+                // A fresh scope per auth: command, so scoped dependencies such as a DbContext do not live for the connection.
+                await using var scope = connection.HttpContext.RequestServices.CreateAsyncScope();
+                session = await scope.ServiceProvider.GetRequiredService<IDarkWsAuthenticator>()
+                    .AuthenticateAsync(connection.HttpContext, token, cancellationToken);
+            }
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             throw;
         } catch (Exception error) {
@@ -193,12 +266,13 @@ internal sealed class WebSocketHandler(
 
     private async Task ShutdownAsync(
         WebSocketConnection connection,
-        IDarkWsContextAccessor context,
         List<Task> tasks,
-        CancellationTokenSource requests
+        CancellationTokenSource requests,
+        Task? reader
     ) {
-        storage.Remove(connection);
+        // Close first, so a ConnectionStorage.Add racing with removal sees a closed connection and ignores it.
         connection.BeginClosing();
+        storage.Remove(connection);
         using var timeout = new CancellationTokenSource(_options.ShutdownTimeout);
         tasks.Add(requests.CancelAsync());
         try {
@@ -209,6 +283,8 @@ internal sealed class WebSocketHandler(
             Log.ShutdownFailed(logger, error);
         }
 
+        // The request token is already cancelled; close hooks get the shutdown deadline instead.
+        var context = CreateContext(connection, timeout.Token);
         foreach (var middleware in middlewares) {
             try {
                 var closing = middleware.OnCloseAsync(context);
@@ -228,6 +304,11 @@ internal sealed class WebSocketHandler(
             connection.WebSocket.Abort();
         }
 
+        if (reader is not null) {
+            // A reader still waiting for data after the close attempt would keep the connection undisposed.
+            if (!reader.IsCompleted) connection.WebSocket.Abort();
+            tasks.Add(reader);
+        }
         _ = DisposeWhenCompletedAsync(Task.WhenAll(tasks), connection, requests);
     }
 
@@ -252,7 +333,7 @@ internal sealed class WebSocketHandler(
         CancellationToken cancellationToken
     ) {
         var context = new DarkWsContextAccessor();
-        context.Initialize(connection, cancellationToken);
+        context.Initialize(connection, cancellationToken, connection.Session);
         return context;
     }
 

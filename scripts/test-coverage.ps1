@@ -1,7 +1,10 @@
 $ErrorActionPreference = "Stop"
 
 $repository = Split-Path -Parent $PSScriptRoot
-$coveragePath = Join-Path ([System.IO.Path]::GetTempPath()) "darkws-coverage.xml"
+# Unique paths keep parallel runs apart; both files are removed afterwards.
+$runId = [guid]::NewGuid().ToString("N")
+$coveragePath = Join-Path ([System.IO.Path]::GetTempPath()) "darkws-coverage-$runId.xml"
+$settingsPath = Join-Path ([System.IO.Path]::GetTempPath()) "darkws-coverage-$runId.config"
 
 Push-Location $repository
 try {
@@ -14,14 +17,31 @@ try {
     dotnet build DarkWS.sln --no-restore
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+    $packages = (dotnet msbuild DarkWS/DarkWS.csproj -getProperty:DarkWsPackages).Trim().Split(';')
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    # Only the published assemblies are instrumented, not Redis, Testcontainers, or test projects.
+    $modules = ($packages | ForEach-Object { [regex]::Escape($_) }) -join '|'
+    @"
+<Configuration>
+  <CodeCoverage>
+    <ModulePaths>
+      <Include>
+        <ModulePath>.*[\\/]($modules)\.dll$</ModulePath>
+      </Include>
+    </ModulePaths>
+  </CodeCoverage>
+</Configuration>
+"@ | Set-Content -LiteralPath $settingsPath -Encoding utf8
+
     dotnet tool run dotnet-coverage collect `
         "dotnet test DarkWS.sln --no-build" `
+        --settings $settingsPath `
         -f cobertura `
         -o $coveragePath
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     [xml]$coverage = Get-Content -Raw $coveragePath
-    foreach ($packageName in "DarkWS", "DarkWS.Redis", "DarkWS.Client", "DarkWS.Client.DependencyInjection") {
+    foreach ($packageName in $packages) {
         $package = $coverage.coverage.packages.package |
             Where-Object name -EQ $packageName |
             Select-Object -First 1
@@ -47,4 +67,5 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
     Pop-Location
+    Remove-Item -LiteralPath $coveragePath, $settingsPath -Force -ErrorAction SilentlyContinue
 }

@@ -59,8 +59,9 @@ internal sealed class Broadcaster(
         ).AsTask();
     }
 
+    // Overloads with data always send a data field: null becomes JSON null rather than a missing field.
     private JsonElement? ToElement<T>(T? data) {
-        return data is null ? null : JsonSerializer.SerializeToElement(data, _options.JsonOptions);
+        return JsonSerializer.SerializeToElement(data, _options.JsonOptions);
     }
 
     internal async ValueTask DeliverAsync(
@@ -81,24 +82,31 @@ internal sealed class Broadcaster(
         if (connections.Count == 0) return;
         var bytes = JsonSerializer.SerializeToUtf8Bytes(notification, _options.JsonOptions);
 
-        await Parallel.ForEachAsync(connections, cancellationToken, async (connection, token) => {
-            if (!connection.IsOpen) {
-                return;
-            }
+        // Sends are asynchronous I/O: start every recipient at once so slow sockets cannot delay the rest.
+        await Task.WhenAll(connections.Select(connection => SendAsync(connection, bytes, cancellationToken)));
+    }
 
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-            timeout.CancelAfter(_options.BroadcastSendTimeout);
+    private async Task SendAsync(IWebSocketConnection connection, byte[] bytes, CancellationToken cancellationToken) {
+        if (!connection.IsOpen) {
+            return;
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(_options.BroadcastSendTimeout);
+        try {
+            await connection.SendAsync(bytes, timeout.Token);
+        } catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) {
+            logger.LogWarning("Broadcast to {ConnectionId} timed out; aborting connection", connection.Id);
             try {
-                await connection.SendAsync(bytes, timeout.Token);
-            } catch (OperationCanceledException) when (!token.IsCancellationRequested) {
-                logger.LogWarning("Broadcast to {ConnectionId} timed out; aborting connection", connection.Id);
-                connection.WebSocket.Abort();
-            } catch (Exception error) when (error is ObjectDisposedException or WebSocketException || error is OperationCanceledException && token.IsCancellationRequested) {
-                logger.LogDebug(error, "Broadcast connection {ConnectionId} closed or was cancelled", connection.Id);
+                connection.Abort();
             } catch (Exception error) {
-                logger.LogWarning(error, "Cannot broadcast to {ConnectionId}", connection.Id);
+                logger.LogWarning(error, "Cannot abort {ConnectionId} after a broadcast timeout", connection.Id);
             }
-        });
+        } catch (Exception error) when (error is ObjectDisposedException or WebSocketException || error is OperationCanceledException && cancellationToken.IsCancellationRequested) {
+            logger.LogDebug(error, "Broadcast connection {ConnectionId} closed or was cancelled", connection.Id);
+        } catch (Exception error) {
+            logger.LogWarning(error, "Cannot broadcast to {ConnectionId}", connection.Id);
+        }
     }
 
     private static string RequireTargetId(DarkWsBroadcast message) {

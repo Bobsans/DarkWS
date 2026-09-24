@@ -44,17 +44,18 @@ public sealed class ScopedProbe {
     public Guid Id { get; } = Guid.NewGuid();
 }
 
+// Hooks of parallel connections run on server threads, so the counters are fields updated with Interlocked.
 public sealed class LifecycleProbe {
-    public int OpenCount { get; set; }
-    public int AuthenticationCount { get; set; }
-    public int CloseCount { get; set; }
-    public int ScopeInitializationCount { get; set; }
-    public string? PreviousSessionId { get; set; }
+    public int OpenCount;
+    public int AuthenticationCount;
+    public int CloseCount;
+    public int ScopeInitializationCount;
+    public volatile string? PreviousSessionId;
 }
 
 public sealed class TestMiddleware(LifecycleProbe probe) : DarkWsMiddleware {
     public override Task OnOpenAsync(IDarkWsContextAccessor context) {
-        probe.OpenCount++;
+        Interlocked.Increment(ref probe.OpenCount);
         return Task.CompletedTask;
     }
 
@@ -62,13 +63,13 @@ public sealed class TestMiddleware(LifecycleProbe probe) : DarkWsMiddleware {
         IDarkWsContextAccessor context,
         IDarkWsSession? previousSession
     ) {
-        probe.AuthenticationCount++;
+        Interlocked.Increment(ref probe.AuthenticationCount);
         probe.PreviousSessionId = previousSession?.Id;
         return Task.CompletedTask;
     }
 
     public override Task OnCloseAsync(IDarkWsContextAccessor context) {
-        probe.CloseCount++;
+        Interlocked.Increment(ref probe.CloseCount);
         return Task.CompletedTask;
     }
 }
@@ -79,7 +80,7 @@ public sealed class TestScopeInitializer(LifecycleProbe probe) : IDarkWsScopeIni
         IDarkWsContextAccessor context,
         CancellationToken cancellationToken
     ) {
-        probe.ScopeInitializationCount++;
+        Interlocked.Increment(ref probe.ScopeInitializationCount);
         return ValueTask.CompletedTask;
     }
 }

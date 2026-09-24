@@ -25,5 +25,19 @@ public sealed record DarkWsBroadcast(
     [property: JsonPropertyName("target")] DarkWsTarget Target,
     [property: JsonPropertyName("targetId")] string? TargetId,
     [property: JsonPropertyName("action")] string Action,
-    [property: JsonPropertyName("data")] JsonElement? Data
+    [property: JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(BroadcastDataConverter))] JsonElement? Data
 );
+
+// No data is omitted and JSON null reads back as a Null element, so an explicit null survives a serializing backplane.
+internal sealed class BroadcastDataConverter : JsonConverter<JsonElement?> {
+    public override bool HandleNull => true;
+
+    public override JsonElement? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) {
+        return JsonElement.ParseValue(ref reader);
+    }
+
+    public override void Write(Utf8JsonWriter writer, JsonElement? value, JsonSerializerOptions options) {
+        if (value is { } element) element.WriteTo(writer);
+        else writer.WriteNullValue();
+    }
+}

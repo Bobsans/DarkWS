@@ -1,6 +1,9 @@
 using System.Net.WebSockets;
+using System.Reflection;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Threading.Channels;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 
@@ -9,6 +12,12 @@ namespace DarkWS.Client.Test;
 [TestFixture]
 public sealed class ClientTests {
     private static TaskCompletionSource<T> Completion<T>() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private static SemaphoreSlim SendGate(DarkWsClient client) {
+        const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Instance;
+        var cycle = typeof(DarkWsClient).GetField("_cycle", flags)!.GetValue(client)!;
+        var connection = cycle.GetType().GetField("Connection", flags)!.GetValue(cycle)!;
+        return (SemaphoreSlim)connection.GetType().GetField("SendGate", flags)!.GetValue(connection)!;
+    }
     private static DarkWsClient Client(TestServer server, Action<DarkWsClientOptions>? configure = null) {
         var options = new DarkWsClientOptions { Endpoint = server.Endpoint, Reconnect = false, CloseTimeout = TimeSpan.FromMilliseconds(100) };
         configure?.Invoke(options);
@@ -78,6 +87,19 @@ public sealed class ClientTests {
         Assert.That(nullRequest.TryGetProperty("payload", out _), Is.False);
         await TestServer.ReplyAsync(socket, nullRequest);
         await explicitNull;
+    }
+
+    [Test]
+    public async Task RequestsUseTheConfiguredEncoder() {
+        await using var server = await TestServer.StartAsync();
+        await using var client = Client(server, options => options.JsonOptions.Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping);
+        var request = client.RequestAsync("encode", "<a&b>");
+        var socket = await server.AcceptAsync();
+        var raw = await TestServer.ReadAsync(socket);
+        Assert.That(raw, Does.Contain("\"data\":\"<a&b>\""));
+        using var document = JsonDocument.Parse(raw);
+        await TestServer.ReplyAsync(socket, document.RootElement, "");
+        await request;
     }
 
     [Test]
@@ -383,6 +405,89 @@ public sealed class ClientTests {
     }
 
     [Test]
+    public async Task TransportFailureDuringAutomaticAuthenticationReconnects() {
+        await using var server = await TestServer.StartAsync();
+        var calls = 0;
+        await using var client = Client(server, options => {
+            options.Reconnect = true;
+            options.ConnectionTimeout = TimeSpan.FromSeconds(10);
+            options.RequestTimeout = Timeout.InfiniteTimeSpan;
+            // The first call ends only when the dropped socket cancels it.
+            options.AuthenticationTokenProvider = async token => {
+                if (Interlocked.Increment(ref calls) == 1) await Task.Delay(Timeout.Infinite, token);
+                return "valid";
+            };
+        });
+        var failures = Channel.CreateUnbounded<Exception>();
+        client.Error += (_, args) => failures.Writer.TryWrite(args.Exception);
+        var connect = client.ConnectAsync();
+        // Drops while the token is fetched and while auth:success is awaited both retry at once, long before ConnectionTimeout.
+        await (await server.AcceptAsync()).CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "restarting", CancellationToken.None);
+        var second = await server.AcceptAsync();
+        Assert.That(await TestServer.ReadAsync(second), Is.EqualTo("auth:valid"));
+        await second.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "restarting", CancellationToken.None);
+        var third = await server.AcceptAsync();
+        Assert.That(await TestServer.ReadAsync(third), Is.EqualTo("auth:valid"));
+        await TestServer.SendAsync(third, "auth:success");
+        await connect.WaitAsync(TimeSpan.FromSeconds(5));
+        for (var i = 0; i < 2; i++) {
+            var failure = (DarkWsConnectionException)await failures.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.That(failure.CloseStatus, Is.EqualTo(WebSocketCloseStatus.EndpointUnavailable));
+        }
+        Assert.That(client.State, Is.EqualTo(DarkWsClientState.Connected));
+        Assert.That(calls, Is.EqualTo(3));
+        Assert.That(server.Connections, Is.EqualTo(3));
+    }
+
+    [Test]
+    public async Task DisposeAsyncClosesTheSocketGracefully() {
+        await using var server = await TestServer.StartAsync();
+        var client = Client(server);
+        await client.ConnectAsync();
+        var socket = await server.AcceptAsync();
+        var read = TestServer.ReadAsync(socket);
+        await client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.That(await read, Is.EqualTo("close"));
+        Assert.That(client.State, Is.EqualTo(DarkWsClientState.Disposed));
+    }
+
+    [TestCase(true)]
+    [TestCase(false)]
+    public async Task QueuedSystemCommandThatNeverReachedTheSocketKeepsTheConnection(bool cancel) {
+        await using var server = await TestServer.StartAsync();
+        await using var client = Client(server, options => options.SendTimeout = TimeSpan.FromMilliseconds(200));
+        await client.ConnectAsync();
+        var socket = await server.AcceptAsync();
+        // Loopback buffers absorb even very large writes here, so the test holds the send queue directly.
+        var gate = SendGate(client);
+        await gate.WaitAsync();
+        using var cancellation = new CancellationTokenSource();
+        var auth = client.AuthenticateAsync("token", cancellation.Token);
+        if (cancel) {
+            cancellation.Cancel();
+            Assert.CatchAsync<OperationCanceledException>(async () => await auth);
+        } else {
+            Assert.That(Assert.ThrowsAsync<DarkWsTimeoutException>(async () => await auth)!.Stage, Is.EqualTo(DarkWsTimeoutStage.Send));
+        }
+        gate.Release();
+        var next = client.RequestAsync<int>("next");
+        var request = await TestServer.RequestAsync(socket);
+        Assert.That(request.GetProperty("action").GetString(), Is.EqualTo("next"));
+        await TestServer.ReplyAsync(socket, request);
+        Assert.That(await next, Is.EqualTo(42));
+        Assert.That(server.Connections, Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task ConnectionFailuresKeepASanitizedCause() {
+        await using var server = await TestServer.StartAsync(httpStatus: 500);
+        await using var client = Client(server, options => options.Endpoint = new Uri(server.Endpoint + "?token=secret-token"));
+        var failure = Assert.ThrowsAsync<DarkWsConnectionException>(() => client.ConnectAsync())!;
+        Assert.That(failure.Message, Does.Contain("WebSocketError."));
+        Assert.That(failure.ToString(), Does.Not.Contain("secret-token"));
+    }
+
+    [Test]
     public async Task ConnectionTimeoutAndDisposalDuringConnectAreBounded() {
         await using var server = await TestServer.StartAsync();
         await using var client = Client(server, options => {
@@ -413,6 +518,9 @@ public sealed class ClientTests {
         Assert.Throws<ArgumentNullException>(() => DarkWsClientServiceCollectionExtensions.AddDarkWsClient(null!, _ => { }));
         Assert.Throws<ArgumentNullException>(() => new ServiceCollection().AddDarkWsClient((Action<DarkWsClientOptions>)null!));
         Assert.Throws<ArgumentNullException>(() => new ServiceCollection().AddDarkWsClient((Action<IServiceProvider, DarkWsClientOptions>)null!));
+        var keyed = new ServiceCollection();
+        keyed.AddKeyedSingleton<IDarkWsClient>("secondary", (_, _) => new DarkWsClient(new Uri("ws://localhost/other")));
+        Assert.DoesNotThrow(() => keyed.AddDarkWsClient(options => options.Endpoint = new Uri("ws://localhost/ws")));
     }
 
     [Test]

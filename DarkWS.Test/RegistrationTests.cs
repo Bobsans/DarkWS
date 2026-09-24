@@ -37,6 +37,7 @@ public sealed class RegistrationTests {
     [TestCase(nameof(DarkWsOptions.SendTimeout))]
     [TestCase(nameof(DarkWsOptions.BroadcastSendTimeout))]
     [TestCase(nameof(DarkWsOptions.ShutdownTimeout))]
+    [TestCase(nameof(DarkWsOptions.RequestQueueTimeout))]
     public void InvalidTimeoutFailsWhenOptionsAreResolved(string property) {
         foreach (var value in new[] { TimeSpan.Zero, TimeSpan.FromMilliseconds(-1), TimeSpan.MaxValue }) {
             var services = new ServiceCollection();
@@ -60,7 +61,47 @@ public sealed class RegistrationTests {
         Assert.That(error!.Message, Does.Contain(type.FullName + ".Invalid").And.Contain(reason));
     }
 
+    [TestCase(typeof(BlankHandlerName))]
+    [TestCase(typeof(PaddedHandlerName))]
+    [TestCase(typeof(NullHandlerName))]
+    [TestCase(typeof(BlankActionName))]
+    [TestCase(typeof(PaddedActionName))]
+    public void BlankOrPaddedNamesFailRegistration(Type type) {
+        var error = Assert.Throws<InvalidOperationException>(() => new DarkWsActionRegistry().Add(type));
+        Assert.That(error!.Message, Does.Contain(type.FullName).And.Contain("invalid").And.Contain("surrounding whitespace"));
+    }
+
     // Abstract fixtures are excluded from assembly scanning by DarkWsBuilder.
+    [Handler("")]
+    public abstract class BlankHandlerName : HandlerBase {
+        [Action("valid")]
+        public IResponse Valid() => Ok();
+    }
+
+    [Handler(" padded")]
+    public abstract class PaddedHandlerName : HandlerBase {
+        [Action("valid")]
+        public IResponse Valid() => Ok();
+    }
+
+    [Handler(null!)]
+    public abstract class NullHandlerName : HandlerBase {
+        [Action("valid")]
+        public IResponse Valid() => Ok();
+    }
+
+    [Handler("names")]
+    public abstract class BlankActionName : HandlerBase {
+        [Action(" ")]
+        public IResponse Invalid() => Ok();
+    }
+
+    [Handler("names")]
+    public abstract class PaddedActionName : HandlerBase {
+        [Action("padded ")]
+        public IResponse Invalid() => Ok();
+    }
+
     public abstract class TwoParameters : HandlerBase {
         [Action("invalid")]
         public IResponse Invalid(int first, int second) => Ok();

@@ -14,7 +14,8 @@ public static class DarkWsClientServiceCollectionExtensions {
     public static IServiceCollection AddDarkWsClient(this IServiceCollection services, Action<IServiceProvider, DarkWsClientOptions> configure) {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configure);
-        if (services.Any(descriptor => descriptor.ServiceType == typeof(IDarkWsClient)))
+        // Keyed registrations for other endpoints do not conflict with the default client.
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(IDarkWsClient) && !descriptor.IsKeyedService))
             throw new InvalidOperationException("IDarkWsClient is already registered. Use separate explicit registrations for multiple sessions.");
         services.AddSingleton<IDarkWsClient>(provider => {
             var options = new DarkWsClientOptions();

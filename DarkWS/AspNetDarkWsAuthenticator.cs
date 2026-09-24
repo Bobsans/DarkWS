@@ -5,7 +5,10 @@ using Microsoft.AspNetCore.Http.Features;
 
 namespace DarkWS;
 
+// Uses the HTTP identity only: a token passed to auth: is not validated.
 internal sealed class AspNetDarkWsAuthenticator : IDarkWsAuthenticator {
+    private static readonly object _fallbackIdKey = new();
+
     public ValueTask<IDarkWsSession?> AuthenticateAsync(
         HttpContext context,
         string? token,
@@ -15,9 +18,10 @@ internal sealed class AspNetDarkWsAuthenticator : IDarkWsAuthenticator {
             return ValueTask.FromResult<IDarkWsSession?>(null);
         }
 
+        // The fallback id stays the same across re-authentication, so session broadcasts keep reaching the connection.
         var id = context.User.FindFirst("sid")?.Value
             ?? context.Features.Get<ISessionFeature>()?.Session.Id
-            ?? Guid.NewGuid().ToString("N");
+            ?? (string)(context.Items[_fallbackIdKey] ??= Guid.NewGuid().ToString("N"));
         return ValueTask.FromResult<IDarkWsSession?>(new AspNetDarkWsSession(id, context.User));
     }
 }

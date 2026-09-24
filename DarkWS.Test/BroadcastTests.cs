@@ -141,8 +141,8 @@ public sealed class BroadcastTests {
         using var host = CreateHost();
         await host.StartAsync();
         var socket = new TestWebSocket();
-        socket.SetState(System.Net.WebSockets.WebSocketState.Closed);
         host.Services.GetRequiredService<ConnectionStorage>().Add(CreateConnection(socket, "one"));
+        socket.SetState(System.Net.WebSockets.WebSocketState.Closed);
 
         await host.Services.GetRequiredService<IBroadcaster>().BroadcastAsync("ignored", new { Value = 1 });
 

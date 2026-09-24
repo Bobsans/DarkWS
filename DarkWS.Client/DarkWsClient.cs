@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Sockets;
 using System.Net.WebSockets;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -97,15 +99,16 @@ public sealed partial class DarkWsClient : IDarkWsClient {
                     await connection.Socket.ConnectAsync(_options.Endpoint, token).ConfigureAwait(false);
                     receive = ReceiveAsync(connection);
                     if (_options.AuthenticationTokenProvider is { } provider && AutomaticAuthenticationEnabled()) {
-                        permanent = true;
                         string? authenticationToken;
                         try { authenticationToken = await provider(token).AsTask().WaitAsync(token).ConfigureAwait(false); }
-                        catch (Exception) when (!token.IsCancellationRequested) { throw new DarkWsConnectionException("Authentication token provider failed."); }
-                        if (string.IsNullOrWhiteSpace(authenticationToken))
+                        catch (Exception) when (!token.IsCancellationRequested) { permanent = true; throw new DarkWsConnectionException("Authentication token provider failed."); }
+                        if (string.IsNullOrWhiteSpace(authenticationToken)) {
+                            permanent = true;
                             throw new DarkWsConnectionException("Authentication token provider returned no credentials.");
+                        }
+                        // auth:failed stays terminal below; a transport failure during the exchange reconnects.
                         if (AutomaticAuthenticationEnabled())
                             await ExchangeControlAsync(connection, authenticationToken, token, connecting: true).ConfigureAwait(false);
-                        permanent = false;
                     }
                     lock (_sync) {
                         if (_cycle != cycle || cycle.Stopping) return;
@@ -119,6 +122,10 @@ public sealed partial class DarkWsClient : IDarkWsClient {
                     await await Task.WhenAny(receive, heartbeat).ConfigureAwait(false);
                     throw Closed(connection.Socket);
                 } catch (Exception exception) {
+                    // Callers arriving during teardown wait for the next connection instead of receiving this one.
+                    lock (_sync) {
+                        if (_cycle == cycle && !cycle.Stopping && cycle.Ready.Task.IsCompleted) cycle.Ready = NewCompletion<Connection>();
+                    }
                     permanent |= exception is DarkWsProtocolException or DarkWsClientLimitException or DarkWsResponseException ||
                         connection.Socket.HttpStatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
                     failure = connection.Failure ?? (exception is OperationCanceledException && !connection.Token.IsCancellationRequested && establishing
@@ -200,7 +207,8 @@ public sealed partial class DarkWsClient : IDarkWsClient {
     private async Task<JsonElement?> ExchangeAsync(Connection connection, string action, object? payload, bool hasPayload, CancellationToken cancellationToken) {
         var id = Guid.NewGuid().ToString("N");
         using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream)) {
+        // The serializer takes escaping from the writer, not from JsonOptions, so the encoder is passed on explicitly.
+        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Encoder = _options.JsonOptions.Encoder })) {
             writer.WriteStartObject();
             writer.WriteString("id", id);
             writer.WriteString("action", action);
@@ -224,7 +232,7 @@ public sealed partial class DarkWsClient : IDarkWsClient {
         } finally { connection.Pending.TryRemove(id, out _); }
     }
 
-    private async Task SendAsync(Connection connection, byte[] bytes, CancellationToken callerToken) {
+    private async Task SendAsync(Connection connection, byte[] bytes, CancellationToken callerToken, StrongBox<bool>? started = null) {
         using var timeout = new CancellationTokenSource(_options.SendTimeout);
         using var queue = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, connection.Token, callerToken);
         try { await connection.SendGate.WaitAsync(queue.Token).ConfigureAwait(false); }
@@ -239,6 +247,7 @@ public sealed partial class DarkWsClient : IDarkWsClient {
             // Publish the write failure before aborting the socket; otherwise the reader can
             // observe the abort first and incorrectly classify it as a connection timeout.
             using var deadline = timeout.Token.Register(() => connection.Fail(new DarkWsTimeoutException(DarkWsTimeoutStage.Send)));
+            if (started is not null) Volatile.Write(ref started.Value, true);
             try { await connection.Socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, true, connection.Token).ConfigureAwait(false); }
             catch (Exception exception) {
                 var failure = connection.Failure ?? SafeFailure(exception);
@@ -293,9 +302,11 @@ public sealed partial class DarkWsClient : IDarkWsClient {
     private async Task ExchangeControlAsync(Connection connection, string? token, CancellationToken cancellationToken, bool connecting = false) {
         var pending = new Pending(token is null ? "logout" : "auth");
         Volatile.Write(ref connection.Control, pending);
+        var started = new StrongBox<bool>();
+        var send = Task.CompletedTask;
         try {
             var bytes = System.Text.Encoding.UTF8.GetBytes(token is null ? "logout" : "auth:" + token);
-            var send = SendAsync(connection, bytes, cancellationToken);
+            send = SendAsync(connection, bytes, cancellationToken, started);
             Observe(send);
             await send.WaitAsync(cancellationToken).ConfigureAwait(false);
             try { await pending.Completion.Task.WaitAsync(_options.RequestTimeout, cancellationToken).ConfigureAwait(false); }
@@ -303,9 +314,14 @@ public sealed partial class DarkWsClient : IDarkWsClient {
                 throw new DarkWsTimeoutException(DarkWsTimeoutStage.Response);
             }
         } catch (Exception exception) when (exception is not DarkWsResponseException) {
-            // System replies have no id. Discard this socket rather than reuse an ambiguous acknowledgement.
-            connection.Fail(connecting && exception is OperationCanceledException && !connection.Token.IsCancellationRequested
-                ? new DarkWsTimeoutException(DarkWsTimeoutStage.Connection) : SafeFailure(exception));
+            // A command still queued is dropped promptly and leaves the socket usable.
+            if (!Volatile.Read(ref started.Value)) {
+                try { await send.ConfigureAwait(false); } catch { /* The caller receives the original exception. */ }
+            }
+            // System replies have no id. Once written, discard this socket rather than reuse an ambiguous acknowledgement.
+            if (Volatile.Read(ref started.Value))
+                connection.Fail(connecting && exception is OperationCanceledException && !connection.Token.IsCancellationRequested
+                    ? new DarkWsTimeoutException(DarkWsTimeoutStage.Connection) : SafeFailure(exception));
             throw;
         } finally { Interlocked.CompareExchange(ref connection.Control, null, pending); }
     }
@@ -355,28 +371,42 @@ public sealed partial class DarkWsClient : IDarkWsClient {
 
     /// <summary>Immediately stops network activity. Prefer DisposeAsync when awaiting network cleanup is possible.</summary>
     public void Dispose() {
+        Cycle? cycle;
+        Connection? connection = null;
         lock (_sync) {
             if (_state == DarkWsClientState.Disposed) return;
             _closed = true;
-            if (_cycle is { } cycle) {
+            cycle = _cycle;
+            if (cycle is not null) {
                 _cycle = null;
                 cycle.Stopping = true;
                 cycle.Ready.TrySetException(new ObjectDisposedException(nameof(DarkWsClient)));
-                cycle.Stop.Cancel();
-                cycle.Connection?.Fail(new ObjectDisposedException(nameof(DarkWsClient)));
+                connection = cycle.Connection;
                 _stopping = Task.WhenAll(_stopping, cycle.Run);
             }
-            _disposed.Cancel();
             foreach (var subscription in _subscriptions.ToArray()) subscription.Dispose();
             _subscriptions.Clear();
             _notifications.Writer.TryComplete();
             ChangeState(DarkWsClientState.Disposed);
             _events.Writer.TryComplete();
         }
+        // Cancellation callbacks and inline continuations run outside the lock.
+        if (cycle is not null) {
+            try { cycle.Stop.Cancel(); } catch (ObjectDisposedException) { /* Cycle already finished. */ }
+            connection?.Fail(new ObjectDisposedException(nameof(DarkWsClient)));
+        }
+        _disposed.Cancel();
     }
 
-    /// <summary>Stops and awaits internal network tasks. Does not wait indefinitely for application callbacks.</summary>
+    /// <summary>Closes an open connection gracefully within CloseTimeout, then stops and awaits internal network tasks. Does not wait indefinitely for application callbacks.</summary>
     public async ValueTask DisposeAsync() {
+        bool connected;
+        lock (_sync) connected = _state == DarkWsClientState.Connected && _cycle is not null;
+        // Only an open connection has a handshake to finish; connecting clients and an already
+        // running close (which may be waiting for its own CloseTimeout) are interrupted instead.
+        if (connected) {
+            try { await CloseAsync().ConfigureAwait(false); } catch (Exception) { /* Disposal proceeds regardless. */ }
+        }
         Dispose();
         await _stopping.ConfigureAwait(false);
     }
@@ -385,7 +415,21 @@ public sealed partial class DarkWsClient : IDarkWsClient {
     private static DarkWsConnectionException Closed(ClientWebSocket? socket = null) =>
         new("The DarkWS connection is closed.", socket?.CloseStatus, socket?.CloseStatusDescription);
     private static Exception SafeFailure(Exception exception) => exception is DarkWsConnectionException or DarkWsTimeoutException or DarkWsProtocolException or DarkWsClientLimitException or DarkWsResponseException
-        ? exception : new DarkWsConnectionException("The WebSocket transport failed.");
+        ? exception : new DarkWsConnectionException($"The WebSocket transport failed: {Describe(exception)}.");
+
+    // Types and error codes only: exception messages can contain the endpoint URI with its query token.
+    private static string Describe(Exception exception) {
+        var causes = new List<string>();
+        for (var current = exception; current is not null; current = current.InnerException) {
+            causes.Add(current switch {
+                WebSocketException socket => $"WebSocketError.{socket.WebSocketErrorCode}",
+                HttpRequestException http => http.StatusCode is { } status ? $"HTTP {(int)status}" : $"HttpRequestError.{http.HttpRequestError}",
+                SocketException network => $"SocketError.{network.SocketErrorCode}",
+                _ => current.GetType().Name
+            });
+        }
+        return string.Join(" > ", causes);
+    }
     private static TaskCompletionSource<T> NewCompletion<T>() {
         var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
         Observe(completion.Task);

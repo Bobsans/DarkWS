@@ -7,12 +7,15 @@
     <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <!-- The only list of published NuGet packages; scripts read it with dotnet msbuild -getProperty:DarkWsPackages. -->
+    <DarkWsPackages>DarkWS;DarkWS.Redis;DarkWS.Client;DarkWS.Client.DependencyInjection</DarkWsPackages>
+    <IsDarkWsPackage>$([System.String]::Copy(';$(DarkWsPackages);').Contains(';$(MSBuildProjectName);'))</IsDarkWsPackage>
   </PropertyGroup>
   <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Test'))">
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'DarkWS' Or '$(MSBuildProjectName)' == 'DarkWS.Redis' Or '$(MSBuildProjectName)' == 'DarkWS.Client' Or '$(MSBuildProjectName)' == 'DarkWS.Client.DependencyInjection'">
+  <PropertyGroup Condition="'$(IsDarkWsPackage)' == 'true'">
     <Authors>Bobsans</Authors>
     <Copyright>Bobsans</Copyright>
     <PackageProjectUrl>https://github.com/Bobsans/DarkWS</PackageProjectUrl>
@@ -28,7 +31,7 @@
     <EmbedAllSources>true</EmbedAllSources>
     <WarningsAsErrors>$(WarningsAsErrors);RS0016;RS0017;RS0024;RS0025;RS0036;RS0037;RS0048;RS0050</WarningsAsErrors>
   </PropertyGroup>
-  <ItemGroup Condition="'$(MSBuildProjectName)' == 'DarkWS' Or '$(MSBuildProjectName)' == 'DarkWS.Redis' Or '$(MSBuildProjectName)' == 'DarkWS.Client' Or '$(MSBuildProjectName)' == 'DarkWS.Client.DependencyInjection'">
+  <ItemGroup Condition="'$(IsDarkWsPackage)' == 'true'">
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
     <None Include="readme.md" Pack="true" PackagePath="\" />
   </ItemGroup>

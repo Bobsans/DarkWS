@@ -1,1 +1,6 @@
 #nullable enable
+DarkWS.Abstractions.IWebSocketConnection.Abort() -> void
+DarkWS.DarkWsOptions.BusyError.get -> string!
+DarkWS.DarkWsOptions.BusyError.set -> void
+DarkWS.DarkWsOptions.RequestQueueTimeout.get -> System.TimeSpan
+DarkWS.DarkWsOptions.RequestQueueTimeout.set -> void

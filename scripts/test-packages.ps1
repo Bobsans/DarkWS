@@ -2,16 +2,20 @@ param([string]$OutputPath = $env:DARKWS_PACKAGE_OUTPUT)
 
 $ErrorActionPreference = "Stop"
 $repository = Split-Path -Parent $PSScriptRoot
-$packageOutput = if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+$temporaryOutput = [string]::IsNullOrWhiteSpace($OutputPath)
+$packageOutput = if ($temporaryOutput) {
     Join-Path ([System.IO.Path]::GetTempPath()) ("darkws-packages-" + [guid]::NewGuid().ToString("N"))
 } else { [System.IO.Path]::GetFullPath($OutputPath) }
+$smokePath = Join-Path ([System.IO.Path]::GetTempPath()) ("darkws-consumer-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $packageOutput -Force | Out-Null
 [xml]$buildProperties = Get-Content -Raw (Join-Path $repository "Directory.Build.props")
 $packageVersion = $buildProperties.SelectSingleNode("/Project/PropertyGroup/VersionPrefix").InnerText
 $frameworks = $buildProperties.SelectSingleNode("/Project/PropertyGroup/TargetFrameworks").InnerText.Split(';')
 Push-Location $repository
 try {
-    foreach ($package in "DarkWS", "DarkWS.Redis", "DarkWS.Client", "DarkWS.Client.DependencyInjection") {
+    $packages = (dotnet msbuild DarkWS/DarkWS.csproj -getProperty:DarkWsPackages).Trim().Split(';')
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    foreach ($package in $packages) {
         dotnet pack "$package/$package.csproj" -c Release --no-restore -o $packageOutput
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         $archivePath = Get-Item -LiteralPath (Join-Path $packageOutput "$package.$packageVersion.nupkg")
@@ -58,15 +62,15 @@ try {
     }
     Write-Host "Package XML and symbols verified: $packageOutput"
 
-    $smokePath = Join-Path ([System.IO.Path]::GetTempPath()) ("darkws-consumer-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $smokePath | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "package-smoke/PackageSmoke.csproj"), (Join-Path $PSScriptRoot "package-smoke/Program.cs") -Destination $smokePath
     $localFeed = [System.Security.SecurityElement]::Escape($packageOutput)
+    $localPatterns = ($packages | ForEach-Object { "<package pattern=""$_""/>" }) -join ''
     @"
 <configuration>
   <packageSources><clear/><add key="local" value="$localFeed"/><add key="nuget" value="https://api.nuget.org/v3/index.json"/></packageSources>
   <packageSourceMapping>
-    <packageSource key="local"><package pattern="DarkWS"/><package pattern="DarkWS.Redis"/><package pattern="DarkWS.Client"/><package pattern="DarkWS.Client.DependencyInjection"/></packageSource>
+    <packageSource key="local">$localPatterns</packageSource>
     <packageSource key="nuget"><package pattern="*"/></packageSource>
   </packageSourceMapping>
 </configuration>
@@ -105,14 +109,22 @@ try {
         $tarball = Join-Path $packageOutput "darkws-$packageVersion.tgz"
         $files = tar -tf $tarball
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        foreach ($required in "package/dist/index.js", "package/dist/index.d.ts", "package/dist/dark-ws.js", "package/dist/dark-ws.d.ts") {
+        # Source maps point at src, so the sources ship with the package.
+        foreach ($required in "package/dist/index.js", "package/dist/index.d.ts", "package/dist/dark-ws.js", "package/dist/dark-ws.d.ts", "package/src/index.ts", "package/src/dark-ws.ts") {
             if ($files -notcontains $required) { throw "npm tarball is missing $required" }
         }
     } finally {
         Pop-Location
         $env:PATH = $previousPath
     }
-    Write-Host "Installed NuGet consumers and clean npm pack verified: $packageOutput"
+    Write-Host "Installed NuGet consumers and clean npm pack verified$(if ($temporaryOutput) { '' } else { ": $packageOutput" })"
 } finally {
     Pop-Location
+    # Temporary directories are removed; an output directory the caller asked for is kept.
+    $cleanup = @($smokePath) + @(if ($temporaryOutput) { $packageOutput })
+    foreach ($path in $cleanup) {
+        if (Test-Path -LiteralPath $path) {
+            try { Remove-Item -LiteralPath $path -Recurse -Force } catch { Write-Warning "Could not remove temporary directory ${path}: $_" }
+        }
+    }
 }

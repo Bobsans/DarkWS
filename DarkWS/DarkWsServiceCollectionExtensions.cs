@@ -27,9 +27,10 @@ public static class DarkWsServiceCollectionExtensions {
             .Validate(value => IsValidTimeout(value.SendTimeout), "SendTimeout must be a positive timer duration")
             .Validate(value => IsValidTimeout(value.BroadcastSendTimeout), "BroadcastSendTimeout must be a positive timer duration")
             .Validate(value => IsValidTimeout(value.ShutdownTimeout), "ShutdownTimeout must be a positive timer duration")
+            .Validate(value => IsValidTimeout(value.RequestQueueTimeout), "RequestQueueTimeout must be a positive timer duration")
             .Validate(value => value.JsonOptions is not null, "JsonOptions is required")
             .Validate(value => !string.IsNullOrWhiteSpace(value.AuthenticationQueryParameter), "AuthenticationQueryParameter is required")
-            .Validate(value => new[] { value.InvalidActionError, value.InvalidRequestError, value.AuthorizationRequiredError, value.RequestFailedError, value.AuthenticationFailedError }.All(error => !string.IsNullOrWhiteSpace(error)), "Error codes must not be empty")
+            .Validate(value => new[] { value.InvalidActionError, value.InvalidRequestError, value.AuthorizationRequiredError, value.RequestFailedError, value.BusyError, value.AuthenticationFailedError }.All(error => !string.IsNullOrWhiteSpace(error)), "Error codes must not be empty")
             .ValidateOnStart();
         var registry = new DarkWsActionRegistry();
 
