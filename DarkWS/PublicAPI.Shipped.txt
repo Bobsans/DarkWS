@@ -39,22 +39,31 @@ DarkWS.ActionAttribute
 DarkWS.ActionAttribute.ActionAttribute(string! name) -> void
 DarkWS.ActionAttribute.Name.get -> string!
 DarkWS.AspNetDarkWsSession
+DarkWS.AspNetDarkWsSession.<Clone>$() -> DarkWS.AspNetDarkWsSession!
 DarkWS.AspNetDarkWsSession.AspNetDarkWsSession(string! Id, System.Security.Claims.ClaimsPrincipal! User) -> void
+DarkWS.AspNetDarkWsSession.Deconstruct(out string! Id, out System.Security.Claims.ClaimsPrincipal! User) -> void
+DarkWS.AspNetDarkWsSession.Equals(DarkWS.AspNetDarkWsSession? other) -> bool
 DarkWS.AspNetDarkWsSession.Groups.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
 DarkWS.AspNetDarkWsSession.Id.get -> string!
 DarkWS.AspNetDarkWsSession.Id.init -> void
 DarkWS.AspNetDarkWsSession.User.get -> System.Security.Claims.ClaimsPrincipal!
 DarkWS.AspNetDarkWsSession.User.init -> void
 DarkWS.BroadcastActionMessage
+DarkWS.BroadcastActionMessage.<Clone>$() -> DarkWS.BroadcastActionMessage!
 DarkWS.BroadcastActionMessage.Action.get -> string!
 DarkWS.BroadcastActionMessage.Action.init -> void
 DarkWS.BroadcastActionMessage.BroadcastActionMessage(string! Action) -> void
+DarkWS.BroadcastActionMessage.Deconstruct(out string! Action) -> void
+DarkWS.BroadcastActionMessage.Equals(DarkWS.BroadcastActionMessage? other) -> bool
 DarkWS.BroadcastActionMessage<T>
+DarkWS.BroadcastActionMessage<T>.<Clone>$() -> DarkWS.BroadcastActionMessage<T>!
 DarkWS.BroadcastActionMessage<T>.Action.get -> string!
 DarkWS.BroadcastActionMessage<T>.Action.init -> void
 DarkWS.BroadcastActionMessage<T>.BroadcastActionMessage(string! Action, T? Data) -> void
 DarkWS.BroadcastActionMessage<T>.Data.get -> T?
 DarkWS.BroadcastActionMessage<T>.Data.init -> void
+DarkWS.BroadcastActionMessage<T>.Deconstruct(out string! Action, out T? Data) -> void
+DarkWS.BroadcastActionMessage<T>.Equals(DarkWS.BroadcastActionMessage<T>? other) -> bool
 DarkWS.Configuration
 DarkWS.ConnectionStorage
 DarkWS.ConnectionStorage.Add(DarkWS.Abstractions.IWebSocketConnection! connection) -> DarkWS.Abstractions.IWebSocketConnection!
@@ -65,11 +74,14 @@ DarkWS.ConnectionStorage.GetByGroup(string! group) -> System.Collections.Generic
 DarkWS.ConnectionStorage.GetBySession(string! sessionId) -> System.Collections.Generic.IReadOnlyCollection<DarkWS.Abstractions.IWebSocketConnection!>!
 DarkWS.ConnectionStorage.Remove(DarkWS.Abstractions.IWebSocketConnection! connection) -> bool
 DarkWS.DarkWsBroadcast
+DarkWS.DarkWsBroadcast.<Clone>$() -> DarkWS.DarkWsBroadcast!
 DarkWS.DarkWsBroadcast.Action.get -> string!
 DarkWS.DarkWsBroadcast.Action.init -> void
 DarkWS.DarkWsBroadcast.DarkWsBroadcast(DarkWS.DarkWsTarget Target, string? TargetId, string! Action, System.Text.Json.JsonElement? Data) -> void
 DarkWS.DarkWsBroadcast.Data.get -> System.Text.Json.JsonElement?
 DarkWS.DarkWsBroadcast.Data.init -> void
+DarkWS.DarkWsBroadcast.Deconstruct(out DarkWS.DarkWsTarget Target, out string? TargetId, out string! Action, out System.Text.Json.JsonElement? Data) -> void
+DarkWS.DarkWsBroadcast.Equals(DarkWS.DarkWsBroadcast? other) -> bool
 DarkWS.DarkWsBroadcast.Target.get -> DarkWS.DarkWsTarget
 DarkWS.DarkWsBroadcast.Target.init -> void
 DarkWS.DarkWsBroadcast.TargetId.get -> string?
@@ -126,14 +138,20 @@ DarkWS.DarkWsTarget.Connection = 1 -> DarkWS.DarkWsTarget
 DarkWS.DarkWsTarget.Group = 3 -> DarkWS.DarkWsTarget
 DarkWS.DarkWsTarget.Session = 2 -> DarkWS.DarkWsTarget
 DarkWS.ErrorMessage
+DarkWS.ErrorMessage.<Clone>$() -> DarkWS.ErrorMessage!
+DarkWS.ErrorMessage.Deconstruct(out string! Id, out string! Error) -> void
+DarkWS.ErrorMessage.Equals(DarkWS.ErrorMessage? other) -> bool
 DarkWS.ErrorMessage.Error.get -> string!
 DarkWS.ErrorMessage.Error.init -> void
 DarkWS.ErrorMessage.ErrorMessage(string! Id, string! Error) -> void
 DarkWS.ErrorMessage.Id.get -> string!
 DarkWS.ErrorMessage.Id.init -> void
 DarkWS.ErrorMessage<T>
+DarkWS.ErrorMessage<T>.<Clone>$() -> DarkWS.ErrorMessage<T>!
 DarkWS.ErrorMessage<T>.Data.get -> T?
 DarkWS.ErrorMessage<T>.Data.init -> void
+DarkWS.ErrorMessage<T>.Deconstruct(out string! Id, out string! Error, out T? Data) -> void
+DarkWS.ErrorMessage<T>.Equals(DarkWS.ErrorMessage<T>? other) -> bool
 DarkWS.ErrorMessage<T>.Error.get -> string!
 DarkWS.ErrorMessage<T>.Error.init -> void
 DarkWS.ErrorMessage<T>.ErrorMessage(string! Id, string! Error, T? Data) -> void
@@ -175,14 +193,20 @@ DarkWS.HandlerBase<TSession>.Session.get -> TSession!
 DarkWS.IResponse
 DarkWS.IResponse.WriteResultAsync(DarkWS.ResponseContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 DarkWS.InputMessage
+DarkWS.InputMessage.<Clone>$() -> DarkWS.InputMessage!
 DarkWS.InputMessage.Action.get -> string!
 DarkWS.InputMessage.Action.init -> void
+DarkWS.InputMessage.Deconstruct(out string! Id, out string! Action, out System.Text.Json.JsonElement? Payload) -> void
+DarkWS.InputMessage.Equals(DarkWS.InputMessage? other) -> bool
 DarkWS.InputMessage.Id.get -> string!
 DarkWS.InputMessage.Id.init -> void
 DarkWS.InputMessage.InputMessage(string! Id, string! Action, System.Text.Json.JsonElement? Payload) -> void
 DarkWS.InputMessage.Payload.get -> System.Text.Json.JsonElement?
 DarkWS.InputMessage.Payload.init -> void
 DarkWS.OkMessage
+DarkWS.OkMessage.<Clone>$() -> DarkWS.OkMessage!
+DarkWS.OkMessage.Deconstruct(out string! Id) -> void
+DarkWS.OkMessage.Equals(DarkWS.OkMessage? other) -> bool
 DarkWS.OkMessage.Id.get -> string!
 DarkWS.OkMessage.Id.init -> void
 DarkWS.OkMessage.OkMessage(string! Id) -> void
@@ -194,8 +218,11 @@ DarkWS.ResponseContext.RequestId.get -> string!
 DarkWS.ResponseContext.ResponseContext(DarkWS.Abstractions.IWebSocketConnection! connection, string! requestId, DarkWS.DarkWsOptions! options) -> void
 DarkWS.ResponseContext.SendAsync<T>(T data, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 DarkWS.ResponseMessage<T>
+DarkWS.ResponseMessage<T>.<Clone>$() -> DarkWS.ResponseMessage<T>!
 DarkWS.ResponseMessage<T>.Data.get -> T?
 DarkWS.ResponseMessage<T>.Data.init -> void
+DarkWS.ResponseMessage<T>.Deconstruct(out string! Id, out T? Data) -> void
+DarkWS.ResponseMessage<T>.Equals(DarkWS.ResponseMessage<T>? other) -> bool
 DarkWS.ResponseMessage<T>.Id.get -> string!
 DarkWS.ResponseMessage<T>.Id.init -> void
 DarkWS.ResponseMessage<T>.ResponseMessage(string! Id, T? Data) -> void
@@ -221,16 +248,61 @@ abstract DarkWS.DarkWsException.GetResponse() -> DarkWS.IResponse!
 const DarkWS.DarkWsOptions.DefaultMaxMessageSizeBytes = 1048576 -> int
 const DarkWS.DarkWsProtocol.BroadcastId = "@" -> string!
 const DarkWS.DarkWsProtocol.LegacyAuthenticationId = "@auth" -> string!
+override DarkWS.AspNetDarkWsSession.Equals(object? obj) -> bool
+override DarkWS.AspNetDarkWsSession.GetHashCode() -> int
+override DarkWS.AspNetDarkWsSession.ToString() -> string!
+override DarkWS.BroadcastActionMessage.Equals(object? obj) -> bool
+override DarkWS.BroadcastActionMessage.GetHashCode() -> int
+override DarkWS.BroadcastActionMessage.ToString() -> string!
+override DarkWS.BroadcastActionMessage<T>.Equals(object? obj) -> bool
+override DarkWS.BroadcastActionMessage<T>.GetHashCode() -> int
+override DarkWS.BroadcastActionMessage<T>.ToString() -> string!
+override DarkWS.DarkWsBroadcast.Equals(object? obj) -> bool
+override DarkWS.DarkWsBroadcast.GetHashCode() -> int
+override DarkWS.DarkWsBroadcast.ToString() -> string!
+override DarkWS.ErrorMessage.Equals(object? obj) -> bool
+override DarkWS.ErrorMessage.GetHashCode() -> int
+override DarkWS.ErrorMessage.ToString() -> string!
+override DarkWS.ErrorMessage<T>.Equals(object? obj) -> bool
+override DarkWS.ErrorMessage<T>.GetHashCode() -> int
+override DarkWS.ErrorMessage<T>.ToString() -> string!
 override DarkWS.ErrorResponseException.GetResponse() -> DarkWS.IResponse!
 override DarkWS.ErrorResponseException<T>.GetResponse() -> DarkWS.IResponse!
+override DarkWS.InputMessage.Equals(object? obj) -> bool
+override DarkWS.InputMessage.GetHashCode() -> int
+override DarkWS.InputMessage.ToString() -> string!
+override DarkWS.OkMessage.Equals(object? obj) -> bool
+override DarkWS.OkMessage.GetHashCode() -> int
+override DarkWS.OkMessage.ToString() -> string!
+override DarkWS.ResponseMessage<T>.Equals(object? obj) -> bool
+override DarkWS.ResponseMessage<T>.GetHashCode() -> int
+override DarkWS.ResponseMessage<T>.ToString() -> string!
+static DarkWS.AspNetDarkWsSession.operator !=(DarkWS.AspNetDarkWsSession? left, DarkWS.AspNetDarkWsSession? right) -> bool
+static DarkWS.AspNetDarkWsSession.operator ==(DarkWS.AspNetDarkWsSession? left, DarkWS.AspNetDarkWsSession? right) -> bool
+static DarkWS.BroadcastActionMessage.operator !=(DarkWS.BroadcastActionMessage? left, DarkWS.BroadcastActionMessage? right) -> bool
+static DarkWS.BroadcastActionMessage.operator ==(DarkWS.BroadcastActionMessage? left, DarkWS.BroadcastActionMessage? right) -> bool
+static DarkWS.BroadcastActionMessage<T>.operator !=(DarkWS.BroadcastActionMessage<T>? left, DarkWS.BroadcastActionMessage<T>? right) -> bool
+static DarkWS.BroadcastActionMessage<T>.operator ==(DarkWS.BroadcastActionMessage<T>? left, DarkWS.BroadcastActionMessage<T>? right) -> bool
 static DarkWS.Configuration.AddDarkWs(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DarkWS.DarkWsOptions!>? configure = null) -> DarkWS.DarkWsBuilder!
 static DarkWS.Configuration.MapDarkWs(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder! endpoints, string! pattern = "/ws") -> Microsoft.AspNetCore.Builder.IEndpointConventionBuilder!
+static DarkWS.DarkWsBroadcast.operator !=(DarkWS.DarkWsBroadcast? left, DarkWS.DarkWsBroadcast? right) -> bool
+static DarkWS.DarkWsBroadcast.operator ==(DarkWS.DarkWsBroadcast? left, DarkWS.DarkWsBroadcast? right) -> bool
 static DarkWS.DarkWsEndpointRouteBuilderExtensions.MapDarkWs(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder! endpoints, string! pattern = "/ws") -> Microsoft.AspNetCore.Builder.IEndpointConventionBuilder!
 static DarkWS.DarkWsServiceCollectionExtensions.AddDarkWs(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<DarkWS.DarkWsOptions!>? configure = null) -> DarkWS.DarkWsBuilder!
+static DarkWS.ErrorMessage.operator !=(DarkWS.ErrorMessage? left, DarkWS.ErrorMessage? right) -> bool
+static DarkWS.ErrorMessage.operator ==(DarkWS.ErrorMessage? left, DarkWS.ErrorMessage? right) -> bool
+static DarkWS.ErrorMessage<T>.operator !=(DarkWS.ErrorMessage<T>? left, DarkWS.ErrorMessage<T>? right) -> bool
+static DarkWS.ErrorMessage<T>.operator ==(DarkWS.ErrorMessage<T>? left, DarkWS.ErrorMessage<T>? right) -> bool
 static DarkWS.HandlerBase.Error(string! error) -> DarkWS.IResponse!
 static DarkWS.HandlerBase.Error<T>(string! error, T details) -> DarkWS.IResponse!
 static DarkWS.HandlerBase.Ok() -> DarkWS.IResponse!
 static DarkWS.HandlerBase.Ok<T>(T data) -> DarkWS.IResponse!
+static DarkWS.InputMessage.operator !=(DarkWS.InputMessage? left, DarkWS.InputMessage? right) -> bool
+static DarkWS.InputMessage.operator ==(DarkWS.InputMessage? left, DarkWS.InputMessage? right) -> bool
+static DarkWS.OkMessage.operator !=(DarkWS.OkMessage? left, DarkWS.OkMessage? right) -> bool
+static DarkWS.OkMessage.operator ==(DarkWS.OkMessage? left, DarkWS.OkMessage? right) -> bool
+static DarkWS.ResponseMessage<T>.operator !=(DarkWS.ResponseMessage<T>? left, DarkWS.ResponseMessage<T>? right) -> bool
+static DarkWS.ResponseMessage<T>.operator ==(DarkWS.ResponseMessage<T>? left, DarkWS.ResponseMessage<T>? right) -> bool
 virtual DarkWS.DarkWsMiddleware.OnAuthenticatedAsync(DarkWS.Abstractions.IDarkWsContextAccessor! context, DarkWS.Abstractions.IDarkWsSession? previousSession) -> System.Threading.Tasks.Task!
 virtual DarkWS.DarkWsMiddleware.OnCloseAsync(DarkWS.Abstractions.IDarkWsContextAccessor! context) -> System.Threading.Tasks.Task!
 virtual DarkWS.DarkWsMiddleware.OnOpenAsync(DarkWS.Abstractions.IDarkWsContextAccessor! context) -> System.Threading.Tasks.Task!
