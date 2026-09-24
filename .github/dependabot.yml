@@ -28,6 +28,9 @@ updates:
     schedule:
       interval: weekly
     groups:
+      # @vitest/coverage-v8 requires the same vitest version, so every update, major included, moves them together.
+      vitest:
+        patterns: ["vitest", "@vitest/*"]
       npm-minor-and-patch:
         patterns: ["*"]
         update-types: [minor, patch]
