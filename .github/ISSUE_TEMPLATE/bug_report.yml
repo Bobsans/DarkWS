@@ -1,0 +1,55 @@
+name: Bug report
+description: Something in a DarkWS package does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Suspected vulnerabilities go through [private reporting](https://github.com/Bobsans/DarkWS/security/advisories/new), not a public issue.
+  - type: dropdown
+    id: packages
+    attributes:
+      label: Packages
+      multiple: true
+      options:
+        - DarkWS
+        - DarkWS.Redis
+        - DarkWS.Client
+        - DarkWS.Client.DependencyInjection
+        - darkws (npm)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: All packages share one version.
+      placeholder: 4.0.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: .NET version, browser or Node.js version, Redis version when relevant.
+      placeholder: .NET 10, Chrome 140, Redis 7.4
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: A minimal handler, client call or program that shows the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Include the error, the response frame or the relevant log lines.
+    validations:
+      required: true

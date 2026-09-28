@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose a new capability or a change to existing behaviour.
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: packages
+    attributes:
+      label: Packages
+      multiple: true
+      options:
+        - DarkWS
+        - DarkWS.Redis
+        - DarkWS.Client
+        - DarkWS.Client.DependencyInjection
+        - darkws (npm)
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do and why the current API does not allow it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: The API or behaviour you suggest. A code sample of the intended usage helps.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Workarounds you use today or other designs you considered.

@@ -1,0 +1,22 @@
+name: Question
+description: Ask how to use DarkWS.
+labels: [question]
+body:
+  - type: dropdown
+    id: packages
+    attributes:
+      label: Packages
+      multiple: true
+      options:
+        - DarkWS
+        - DarkWS.Redis
+        - DarkWS.Client
+        - DarkWS.Client.DependencyInjection
+        - darkws (npm)
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What you want to achieve and what you have tried.
+    validations:
+      required: true
