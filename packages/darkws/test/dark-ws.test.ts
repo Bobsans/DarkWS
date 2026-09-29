@@ -165,6 +165,133 @@ describe("DarkWs", () => {
     client.dispose();
   });
 
+  it("identifies current and stale socket events without changing their payloads", () => {
+    const client = createClient();
+    expect(client.isCurrentSocket(new Event("open"))).toBe(false);
+    const opened: Event[] = [];
+    const closed: boolean[] = [];
+    client.on("open", event => opened.push(event));
+    client.on("close", event => closed.push(client.isCurrentSocket(event)));
+    client.connect();
+    const first = MockWebSocket.instances[0];
+    first.open();
+    expect(opened[0].target).toBe(first);
+    expect(client.isCurrentSocket(opened[0])).toBe(true);
+    first.serverClose();
+    expect(closed.at(-1)).toBe(true);
+
+    client.reconnect();
+    const second = MockWebSocket.instances[1];
+    second.open();
+    expect(client.isCurrentSocket(opened[0])).toBe(false);
+    expect(client.isCurrentSocket(opened[1])).toBe(true);
+    first.serverClose();
+    expect(closed.at(-1)).toBe(false);
+    expect(client.connected).toBe(true);
+    second.serverClose();
+    expect(closed.at(-1)).toBe(true);
+    client.dispose();
+    expect(client.isCurrentSocket(opened[1])).toBe(false);
+  });
+
+  describe("reconnectOnVisible", () => {
+    let page: EventTarget & { visibilityState: string };
+    const visibility = (state: string): void => {
+      page.visibilityState = state;
+      page.dispatchEvent(new Event("visibilitychange"));
+    };
+
+    beforeEach(() => {
+      page = Object.assign(new EventTarget(), { visibilityState: "hidden" });
+      vi.stubGlobal("document", page);
+    });
+
+    it("skips pending backoff on visibility without replacing an open or opening socket", () => {
+      const client = createClient({ reconnectOnVisible: true, reconnectTimeout: 10000 });
+      visibility("visible");
+      expect(MockWebSocket.instances).toHaveLength(0);
+      client.connect();
+      const first = MockWebSocket.instances[0];
+      first.open();
+      first.serverClose();
+      expect(vi.getTimerCount()).toBe(1);
+      visibility("hidden");
+      expect(MockWebSocket.instances).toHaveLength(1);
+      visibility("visible");
+      expect(MockWebSocket.instances).toHaveLength(2);
+      expect(vi.getTimerCount()).toBe(0);
+      visibility("visible");
+      MockWebSocket.instances[1].open();
+      visibility("visible");
+      expect(MockWebSocket.instances).toHaveLength(2);
+      client.dispose();
+    });
+
+    it.each<Partial<DarkWsOptions>>([{}, { reconnectOnVisible: false }, { reconnectOnVisible: true, reconnect: false }])(
+      "does not accelerate reconnect when disabled: %j", options => {
+        const client = createClient(options).connect();
+        MockWebSocket.instances[0].open();
+        MockWebSocket.instances[0].serverClose();
+        visibility("visible");
+        expect(MockWebSocket.instances).toHaveLength(1);
+        client.dispose();
+      },
+    );
+
+    it.each(["close", "dispose"] as const)("does not reconnect after %s cancels a pending retry", method => {
+      const remove = vi.spyOn(page, "removeEventListener");
+      const client = createClient({ reconnectOnVisible: true }).connect();
+      MockWebSocket.instances[0].open();
+      MockWebSocket.instances[0].serverClose();
+      client[method]();
+      visibility("visible");
+      vi.advanceTimersByTime(1000);
+      expect(MockWebSocket.instances).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+      client.dispose();
+      expect(remove).toHaveBeenCalledExactlyOnceWith("visibilitychange", expect.any(Function));
+    });
+
+    it("still respects canConnect when the tab returns", () => {
+      let allowed = false;
+      const client = createClient({ reconnectOnVisible: true, canConnect: () => allowed }).connect();
+      visibility("visible");
+      expect(MockWebSocket.instances).toHaveLength(0);
+      allowed = true;
+      visibility("visible");
+      expect(MockWebSocket.instances).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+      client.dispose();
+    });
+
+    it("keeps retrying if the immediate connection attempt throws", () => {
+      let failing = false;
+      const client = createClient({
+        reconnectOnVisible: true,
+        query: () => { if (failing) throw new Error("token storage unavailable"); return {}; },
+      }).connect();
+      MockWebSocket.instances[0].open();
+      MockWebSocket.instances[0].serverClose();
+      failing = true;
+      visibility("visible");
+      expect(MockWebSocket.instances).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(1);
+      failing = false;
+      vi.advanceTimersByTime(1000);
+      expect(MockWebSocket.instances).toHaveLength(2);
+      client.dispose();
+    });
+
+    it("works without a browser document", () => {
+      vi.stubGlobal("document", undefined);
+      const client = createClient({ reconnectOnVisible: true }).connect();
+      MockWebSocket.instances[0].serverClose();
+      vi.advanceTimersByTime(100);
+      expect(MockWebSocket.instances).toHaveLength(2);
+      client.dispose();
+    });
+  });
+
   it("does not reconnect after an intentional close", () => {
     const client = createClient().connect();
     MockWebSocket.instances[0].open();

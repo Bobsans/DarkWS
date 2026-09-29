@@ -8,6 +8,10 @@ include migration guidance before a release is published.
 
 ### Added
 
+- Browser client `isCurrentSocket(event)` identifies native events from the
+  currently assigned socket without changing event payloads. Opt-in
+  `reconnectOnVisible` skips pending reconnect backoff when the tab becomes
+  visible, respecting connection gates and explicit close/disposal.
 - `DarkWsOptions.RunActionsOnThreadPool` (default false) moves action processing
   to the thread pool so synchronous handlers do not stall the dispatcher.
   Scheduled actions retain the per-connection concurrency limit and capture their

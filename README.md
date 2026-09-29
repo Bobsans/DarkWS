@@ -429,6 +429,15 @@ socket and reconnects, which detects half-open connections. `connect()` keeps an
 open or opening socket, `close(code)` accepts only 1000 or 3000–4999, and request ids
 do not require a secure context.
 
+Use `client.isCurrentSocket(event)` in `open`/`close` listeners to distinguish the
+current socket from a replaced one without changing the event payload. It checks
+socket identity, including a current socket's close event, and returns `false`
+for every event after disposal. With `reconnectOnVisible: true` (default `false`),
+a visible tab immediately retries a pending automatic reconnect instead of
+waiting out the backoff. Connection hooks and gates still apply; open/opening
+sockets, explicit close, disposal, and `reconnect: false` are respected. Disposal
+removes the visibility listener; environments without `document` use timers only.
+
 To restore the session on every socket, pass `authenticationToken: () => token`.
 The client sends `auth:<token>` when a socket opens and holds queued and new
 requests until `auth:success`, so a request made during reconnect cannot reach the

@@ -86,5 +86,25 @@ changing state. Request ids use `crypto.randomUUID()` when available and
 `crypto.getRandomValues()` otherwise, so plain `http:` pages outside a secure
 context work too.
 
+`isCurrentSocket(event)` identifies native events from the currently assigned
+socket, including its `close` event. After replacement, events from the old socket
+return `false`; after `dispose()`, all events return `false`. Event payloads are
+unchanged. Use it in lifecycle listeners or when processing a saved event later:
+
+```ts
+client.on("close", event => {
+  if (!client.isCurrentSocket(event)) return;
+  console.log("Current connection closed", event.code);
+});
+```
+
+Set `reconnectOnVisible: true` (default `false`) to retry a pending automatic
+reconnect immediately when the document becomes visible, skipping the remaining
+backoff delay. It still respects `canConnect` and `beforeConnect`, keeps open or
+opening sockets, and does nothing after `close()`, after `dispose()`, or with
+`reconnect: false`. It does not connect an idle client that has never called
+`connect()`. The listener is removed on disposal; outside a browser, normal
+timer-based reconnect continues without a visibility listener.
+
 `npm pack` runs the build automatically through `prepack`, including on a clean
 checkout without `dist`.

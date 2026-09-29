@@ -17,6 +17,8 @@ export interface DarkWsOptions {
   requestTimeout?: number;
   reconnect?: boolean;
   reconnectTimeout?: number;
+  /** Retry a pending automatic reconnect immediately when the document becomes visible. Default false. */
+  reconnectOnVisible?: boolean;
   pingInterval?: number;
   /** @deprecated Use `pingInterval`: this value is the interval between pings, not a timeout. */
   pingTimeout?: number;
@@ -113,6 +115,13 @@ export default class DarkWs {
   private ready = false;
   private closedByClient = false;
   private disposed = false;
+  private readonly visibilityDocument?: Document;
+  private readonly onVisibilityChange = (): void => {
+    if (this.visibilityDocument?.visibilityState === "visible" && this.reconnectTimer !== undefined) {
+      this.clearReconnectTimer();
+      this.tryConnect();
+    }
+  };
 
   constructor(options: DarkWsOptions) {
     this.options = {
@@ -125,6 +134,10 @@ export default class DarkWs {
       ...options,
     };
     this.pingInterval = options.pingInterval ?? options.pingTimeout ?? 30000;
+    if (options.reconnectOnVisible && typeof document !== "undefined") {
+      this.visibilityDocument = document;
+      this.visibilityDocument.addEventListener("visibilitychange", this.onVisibilityChange);
+    }
   }
 
   public get closing(): boolean {
@@ -141,6 +154,11 @@ export default class DarkWs {
 
   public get pendingRequestCount(): number {
     return this.requests.size;
+  }
+
+  /** Whether the native event belongs to the currently assigned socket, regardless of its ready state. */
+  public isCurrentSocket(event: Event): boolean {
+    return this.socket !== undefined && event.target === this.socket;
   }
 
   public connect(): this {
@@ -272,6 +290,7 @@ export default class DarkWs {
     }
     this.disposed = true;
     this.closedByClient = true;
+    this.visibilityDocument?.removeEventListener("visibilitychange", this.onVisibilityChange);
     this.clearReconnectTimer();
     this.clearPingTimer();
     this.rejectConnectionWaiters(new ConnectionClosedError("DarkWs client was disposed"));
@@ -498,14 +517,18 @@ export default class DarkWs {
     this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
-      try {
-        this.connect();
-      } catch (error) {
-        // A failing query() or WebSocket constructor must not end reconnecting: try again later.
-        this.debug("Reconnect failed", error);
-        this.scheduleReconnect();
-      }
+      this.tryConnect();
     }, delay);
+  }
+
+  private tryConnect(): void {
+    try {
+      this.connect();
+    } catch (error) {
+      // A failing query() or WebSocket constructor must not end reconnecting: try again later.
+      this.debug("Reconnect failed", error);
+      this.scheduleReconnect();
+    }
   }
 
   // The current socket is gone: reconnect, or fail waiters at once when nothing would open another socket.
