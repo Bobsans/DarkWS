@@ -49,7 +49,7 @@ internal sealed class DarkWsActionRegistry {
             }
 
             var allowAnonymous = classAllowsAnonymous || method.GetCustomAttribute<AllowAnonymousAttribute>() is not null;
-            _actions.Add(key, CreateDescriptor(type, method, parameters.FirstOrDefault()?.ParameterType, allowAnonymous));
+            _actions.Add(key, CreateDescriptor(new DarkWsActionInfo(key, type, method), parameters.FirstOrDefault()?.ParameterType, allowAnonymous));
         }
     }
 
@@ -57,26 +57,25 @@ internal sealed class DarkWsActionRegistry {
     private static bool IsValidName(string? name) => !string.IsNullOrWhiteSpace(name) && name.Trim() == name;
 
     private static ActionDescriptorBase CreateDescriptor(
-        Type handlerType,
-        MethodInfo method,
+        DarkWsActionInfo action,
         Type? parameterType,
         bool allowAnonymous
     ) {
         var instance = Expression.Parameter(typeof(object), "instance");
         var parameter = Expression.Parameter(typeof(object), "parameter");
         var arguments = parameterType is null ? [] : new[] { Expression.Convert(parameter, parameterType) };
-        var call = Expression.Call(Expression.Convert(instance, handlerType), method, arguments);
-        var payload = method.GetParameters().FirstOrDefault();
+        var call = Expression.Call(Expression.Convert(instance, action.HandlerType), action.Method, arguments);
+        var payload = action.Method.GetParameters().FirstOrDefault();
         var allowsNullPayload = payload is null || (parameterType!.IsValueType
             ? Nullable.GetUnderlyingType(parameterType) is not null
             : new NullabilityInfoContext().Create(payload).ReadState != NullabilityState.NotNull);
 
-        if (method.ReturnType == typeof(IResponse)) {
+        if (action.Method.ReturnType == typeof(IResponse)) {
             var invoker = Expression.Lambda<Func<object, object?, IResponse>>(call, instance, parameter).Compile();
-            return new ActionDescriptor(handlerType, parameterType, allowAnonymous, allowsNullPayload, invoker);
+            return new ActionDescriptor(action, parameterType, allowAnonymous, allowsNullPayload, invoker);
         }
 
         var asyncInvoker = Expression.Lambda<Func<object, object?, Task<IResponse>>>(call, instance, parameter).Compile();
-        return new AsyncActionDescriptor(handlerType, parameterType, allowAnonymous, allowsNullPayload, asyncInvoker);
+        return new AsyncActionDescriptor(action, parameterType, allowAnonymous, allowsNullPayload, asyncInvoker);
     }
 }

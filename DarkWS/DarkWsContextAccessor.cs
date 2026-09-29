@@ -11,6 +11,7 @@ internal sealed class DarkWsContextAccessor : IDarkWsContextAccessor {
     }
     private IWebSocketConnection? _connection;
     private IDarkWsSession? _session;
+    private DarkWsActionInfo? _action;
     private CancellationToken _connectionAborted;
     public HttpContext HttpContext => Connection.HttpContext;
     public ISession? AspNetSession => HttpContext.Features.Get<ISessionFeature>()?.Session;
@@ -19,10 +20,14 @@ internal sealed class DarkWsContextAccessor : IDarkWsContextAccessor {
     public CancellationToken ConnectionAborted {
         get { _ = Connection; return _connectionAborted; }
     }
+    public DarkWsActionInfo? Action {
+        get { _ = Connection; return _action; }
+    }
 
-    public void Initialize(IWebSocketConnection connection, CancellationToken cancellationToken, IDarkWsSession? session) {
+    public void Initialize(IWebSocketConnection connection, CancellationToken cancellationToken, IDarkWsSession? session, DarkWsActionInfo? action = null) {
         _connection = connection;
         _session = session;
+        _action = action;
         _connectionAborted = cancellationToken;
     }
 }

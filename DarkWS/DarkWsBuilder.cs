@@ -56,6 +56,12 @@ public sealed class DarkWsBuilder {
         return this;
     }
 
+    /// <summary>Registers a scoped action filter. Filters run in registration order around bound actions.</summary>
+    public DarkWsBuilder AddActionFilter<TFilter>() where TFilter : class, IDarkWsActionFilter {
+        Services.AddScoped<IDarkWsActionFilter, TFilter>();
+        return this;
+    }
+
     private static IEnumerable<Type> GetLoadableTypes(Assembly assembly) {
         try {
             return assembly.GetTypes();

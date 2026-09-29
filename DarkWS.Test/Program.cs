@@ -8,7 +8,7 @@ using Microsoft.Extensions.Hosting;
 namespace DarkWS.Test;
 
 public static class Setup {
-    public static IHostBuilder CreateBuilder() {
+    public static IHostBuilder CreateBuilder(Action<IServiceCollection, DarkWsBuilder>? configureDarkWs = null) {
         return new HostBuilder().ConfigureWebHost(webBuilder => webBuilder
             .UseTestServer()
             .ConfigureServices(services => {
@@ -17,10 +17,11 @@ public static class Setup {
                 services.AddSession();
                 services.AddScoped<ScopedProbe>();
                 services.AddSingleton<LifecycleProbe>();
-                services.AddDarkWs()
+                var darkWs = services.AddDarkWs()
                     .AddHandlersFromAssemblyContaining<TestHandler>()
                     .AddAuthenticator<TestAuthenticator, TestSession>()
                     .AddScopeInitializer<TestScopeInitializer>();
+                configureDarkWs?.Invoke(services, darkWs);
             })
             .Configure(app => {
                 app.UseRouting();

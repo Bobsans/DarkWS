@@ -208,15 +208,26 @@ internal sealed class WebSocketHandler(
                 return new ErrorResponse(_options.InvalidRequestError);
             }
             var context = services.GetRequiredService<DarkWsContextAccessor>();
-            context.Initialize(connection, cancellationToken, session);
+            context.Initialize(connection, cancellationToken, session, action.Action);
 
             foreach (var initializer in services.GetServices<IDarkWsScopeInitializer>()) {
                 await initializer.InitializeAsync(services, context, cancellationToken);
             }
 
-            var handler = (HandlerBase)services.GetRequiredService(action.HandlerType);
-            handler.Initialize(this, context);
-            var result = await action.InvokeAsync(handler, parameter)
+            var filterContext = new DarkWsActionContext(action.Action, parameter, session, services, cancellationToken);
+            async ValueTask<IResponse> InvokeHandlerAsync() {
+                var handler = (HandlerBase)services.GetRequiredService(action.HandlerType);
+                handler.Initialize(this, context, services);
+                return await action.InvokeAsync(handler, parameter)
+                    ?? throw new InvalidOperationException($"Action {message.Action} returned no response");
+            }
+
+            Func<ValueTask<IResponse>> invoke = InvokeHandlerAsync;
+            foreach (var filter in services.GetServices<IDarkWsActionFilter>().Reverse()) {
+                var next = invoke;
+                invoke = () => filter.InvokeAsync(filterContext, next);
+            }
+            var result = await invoke()
                 ?? throw new InvalidOperationException($"Action {message.Action} returned no response");
             if (logger.IsEnabled(LogLevel.Debug)) Log.Completed(logger, message.Action, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, null);
             return result;

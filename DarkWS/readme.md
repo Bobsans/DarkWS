@@ -98,6 +98,30 @@ An injected `IDarkWsContextAccessor` is initialized only inside a message scope.
 Other scopes receive `InvalidOperationException` on property access. Lifecycle
 middleware should use the context supplied to its hook.
 
+## Action filters and metadata
+
+Register global filters with `AddActionFilter<TFilter>()`. They are scoped per
+message and run in registration order, with the first filter outermost. A filter
+may return an `IResponse` without calling `next`, or inspect the response or
+exception from `next`. Call `next` at most once.
+
+```csharp
+services.AddDarkWs()
+    .AddHandlersFromAssemblyContaining<MessageHandler>()
+    .AddActionFilter<AppActionFilter>();
+```
+
+Filters run after action lookup, authorization, payload binding, and scope
+initializers. They do not run for malformed JSON, unknown actions, unauthorized
+requests, or invalid payloads. `DarkWsActionContext` exposes the registered
+action name, handler type, method and method attributes through `Action`, plus
+the deserialized `Payload`, captured `Session`, message `Services`, and
+`CancellationToken`. `IDarkWsContextAccessor.Action` exposes the same metadata
+to scope initializers and scoped services; it is null in connection lifecycle
+hooks. `HandlerBase.Services` is the current message scope's service provider.
+
+## Response handling
+
 Results are serialized before the message scope is disposed, so deferred data over
 a scoped service is still readable. A `null` result, a result that cannot be
 serialized, or a custom `IResponse` that fails before sending is answered with
@@ -150,9 +174,10 @@ delegate compilation, and JSON serialization depend on reflection/runtime code
 generation. Use ordinary JIT publishing. The .NET 8/9/10 targets are intentional:
 their liveness mechanisms differ.
 
-Only `[AllowAnonymous]` is supported for action authorization. `[Authorize]` and
-other `IAuthorizeData` on handlers/actions fail registration; implement domain
-role/policy checks inside handlers and return controlled errors on denial.
+Only `[AllowAnonymous]` is supported for built-in action authorization.
+`[Authorize]` and other `IAuthorizeData` on handlers/actions fail registration;
+implement domain role/policy checks in handlers or action filters and return
+controlled errors on denial.
 
 Query-string tokens can be recorded by proxies and access logs. Use short-lived
 tickets or, where the host/authenticator permits an anonymous upgrade, authenticate

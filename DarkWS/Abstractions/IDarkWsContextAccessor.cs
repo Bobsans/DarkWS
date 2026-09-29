@@ -4,6 +4,8 @@ namespace DarkWS.Abstractions;
 
 /// <summary>Current message context. Uninitialized access throws InvalidOperationException; lifecycle hooks receive context explicitly.</summary>
 public interface IDarkWsContextAccessor {
+    /// <summary>Gets the current action, or null in connection lifecycle hooks.</summary>
+    DarkWsActionInfo? Action { get; }
     /// <summary>Gets the current session, or null for anonymous access.</summary>
     IDarkWsSession? Session { get; }
     /// <summary>Gets the HTTP upgrade context shared by the connection. Not thread-safe: concurrent actions of the connection share it.</summary>

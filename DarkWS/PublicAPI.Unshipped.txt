@@ -1,6 +1,22 @@
 #nullable enable
+DarkWS.Abstractions.IDarkWsActionFilter
+DarkWS.Abstractions.IDarkWsActionFilter.InvokeAsync(DarkWS.DarkWsActionContext! context, System.Func<System.Threading.Tasks.ValueTask<DarkWS.IResponse!>>! next) -> System.Threading.Tasks.ValueTask<DarkWS.IResponse!>
+DarkWS.Abstractions.IDarkWsContextAccessor.Action.get -> DarkWS.DarkWsActionInfo?
 DarkWS.Abstractions.IWebSocketConnection.Abort() -> void
+DarkWS.DarkWsActionContext
+DarkWS.DarkWsActionContext.Action.get -> DarkWS.DarkWsActionInfo!
+DarkWS.DarkWsActionContext.CancellationToken.get -> System.Threading.CancellationToken
+DarkWS.DarkWsActionContext.Payload.get -> object?
+DarkWS.DarkWsActionContext.Services.get -> System.IServiceProvider!
+DarkWS.DarkWsActionContext.Session.get -> DarkWS.Abstractions.IDarkWsSession?
+DarkWS.DarkWsActionInfo
+DarkWS.DarkWsActionInfo.Attributes.get -> System.Collections.Generic.IReadOnlyList<System.Attribute!>!
+DarkWS.DarkWsActionInfo.HandlerType.get -> System.Type!
+DarkWS.DarkWsActionInfo.Method.get -> System.Reflection.MethodInfo!
+DarkWS.DarkWsActionInfo.Name.get -> string!
+DarkWS.DarkWsBuilder.AddActionFilter<TFilter>() -> DarkWS.DarkWsBuilder!
 DarkWS.DarkWsOptions.BusyError.get -> string!
 DarkWS.DarkWsOptions.BusyError.set -> void
 DarkWS.DarkWsOptions.RequestQueueTimeout.get -> System.TimeSpan
 DarkWS.DarkWsOptions.RequestQueueTimeout.set -> void
+DarkWS.HandlerBase.Services.get -> System.IServiceProvider!

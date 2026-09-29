@@ -3,12 +3,13 @@ using System.Text.Json;
 namespace DarkWS;
 
 internal abstract class ActionDescriptorBase(
-    Type handlerType,
+    DarkWsActionInfo action,
     Type? parameterType,
     bool allowAnonymous,
     bool allowsNullPayload
 ) {
-    public Type HandlerType { get; } = handlerType;
+    public DarkWsActionInfo Action { get; } = action;
+    public Type HandlerType => Action.HandlerType;
     public bool AllowAnonymous { get; } = allowAnonymous;
 
     public object? DeserializeParameter(JsonElement? value, JsonSerializerOptions options) {
@@ -24,24 +25,24 @@ internal abstract class ActionDescriptorBase(
 }
 
 internal sealed class ActionDescriptor(
-    Type handlerType,
+    DarkWsActionInfo action,
     Type? parameterType,
     bool allowAnonymous,
     bool allowsNullPayload,
     Func<object, object?, IResponse> handler
-) : ActionDescriptorBase(handlerType, parameterType, allowAnonymous, allowsNullPayload) {
+) : ActionDescriptorBase(action, parameterType, allowAnonymous, allowsNullPayload) {
     public override ValueTask<IResponse> InvokeAsync(object instance, object? parameter) {
         return ValueTask.FromResult(handler(instance, parameter));
     }
 }
 
 internal sealed class AsyncActionDescriptor(
-    Type handlerType,
+    DarkWsActionInfo action,
     Type? parameterType,
     bool allowAnonymous,
     bool allowsNullPayload,
     Func<object, object?, Task<IResponse>> handler
-) : ActionDescriptorBase(handlerType, parameterType, allowAnonymous, allowsNullPayload) {
+) : ActionDescriptorBase(action, parameterType, allowAnonymous, allowsNullPayload) {
     public override async ValueTask<IResponse> InvokeAsync(object instance, object? parameter) {
         return await handler(instance, parameter);
     }

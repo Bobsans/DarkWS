@@ -7,6 +7,8 @@ namespace DarkWS;
 public abstract class HandlerBase {
     private WebSocketHandler Owner { get; set; } = null!;
     private IDarkWsContextAccessor Context { get; set; } = null!;
+    /// <summary>Gets the current message scope's service provider.</summary>
+    protected IServiceProvider Services { get; private set; } = null!;
 
     /// <summary>Gets the required handler session. Throws InvalidOperationException for an anonymous connection or incompatible typed session.</summary>
     protected IDarkWsSession Session => Context.Session
@@ -20,9 +22,10 @@ public abstract class HandlerBase {
     /// <summary>Gets the token signaled when the connection stops. Handlers should observe it during asynchronous work.</summary>
     protected CancellationToken ConnectionAborted => Context.ConnectionAborted;
 
-    internal void Initialize(WebSocketHandler owner, IDarkWsContextAccessor context) {
+    internal void Initialize(WebSocketHandler owner, IDarkWsContextAccessor context, IServiceProvider services) {
         Owner = owner;
         Context = context;
+        Services = services;
     }
 
     /// <summary>Creates a successful action result with optional typed data.</summary>
