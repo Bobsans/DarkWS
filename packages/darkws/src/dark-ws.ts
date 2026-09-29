@@ -40,6 +40,21 @@ export interface DarkWsRequest<TPayload = unknown> {
   data?: TPayload;
 }
 
+export interface DarkWsRetryOptions {
+  /** Additional attempts after ConnectionClosedError. Default 0; use only for idempotent actions. */
+  connectionClosed?: number;
+  /** Additional attempts after RequestTimeoutError. Default 0; use only for idempotent actions. */
+  timeout?: number;
+  /** Maximum random delay before each retry, in milliseconds. Default 0. */
+  jitter?: number;
+}
+
+export interface DarkWsRequestOptions {
+  /** Reply timeout per attempt, in milliseconds. Defaults to requestTimeout; 0 disables it. */
+  timeout?: number;
+  retry?: DarkWsRetryOptions;
+}
+
 interface ResponseMessage {
   id: string;
   action?: string;
@@ -49,6 +64,7 @@ interface ResponseMessage {
 
 interface RequestResolver {
   request: DarkWsRequest;
+  sent: boolean;
   control?: boolean;
   socket?: WebSocket;
   timeout?: ReturnType<typeof setTimeout>;
@@ -74,7 +90,8 @@ export class ErrorResponse<TData = unknown> extends Error {
 }
 
 export class ConnectionClosedError extends Error {
-  constructor(message: string) {
+  /** sent means at least one attempt was accepted by WebSocket.send, not that the server acknowledged it. */
+  constructor(message: string, public readonly sent = false) {
     super(message);
     this.name = "ConnectionClosedError";
   }
@@ -104,6 +121,8 @@ export default class DarkWs {
   private controlTail: Promise<void> = Promise.resolve();
   private controlRequest?: RequestResolver;
   private readonly connectionWaiters = new Set<ConnectionWaiter>();
+  private readonly retryTimers = new Map<ReturnType<typeof setTimeout>, (message: string) => void>();
+  private closeGeneration = 0;
   private readonly options: Required<Pick<DarkWsOptions,
     "reconnect" | "reconnectTimeout" | "requestTimeout" | "controlTimeout" | "pongTimeout" |
     "waitConnectionTimeout" | "debug">> & DarkWsOptions;
@@ -156,7 +175,7 @@ export default class DarkWs {
   }
 
   public get pendingRequestCount(): number {
-    return this.requests.size;
+    return this.requests.size + this.retryTimers.size;
   }
 
   /** Whether the native event belongs to the currently assigned socket, regardless of its ready state. */
@@ -226,9 +245,50 @@ export default class DarkWs {
   public request<TResult, TPayload = unknown>(
     action: string,
     payload?: TPayload,
-    timeoutMs?: number,
+    options?: number | DarkWsRequestOptions,
   ): Promise<TResult> {
     this.assertNotDisposed();
+    return this.requestWithRetry<TResult, TPayload>(action, payload, typeof options === "number" ? { timeout: options } : options ?? {});
+  }
+
+  private async requestWithRetry<TResult, TPayload>(action: string, payload: TPayload | undefined, options: DarkWsRequestOptions): Promise<TResult> {
+    let connectionRetries = options.retry?.connectionClosed ?? 0;
+    let timeoutRetries = options.retry?.timeout ?? 0;
+    const jitter = options.retry?.jitter ?? 0;
+    const timeout = options.timeout;
+    if (!Number.isSafeInteger(connectionRetries) || connectionRetries < 0 ||
+        !Number.isSafeInteger(timeoutRetries) || timeoutRetries < 0 ||
+        !Number.isFinite(jitter) || jitter < 0 || jitter > 2147483647) {
+      throw new RangeError("Retry counts must be non-negative safe integers; jitter must be between 0 and 2147483647 ms");
+    }
+
+    const generation = this.closeGeneration;
+    let sent = false;
+    for (;;) {
+      try {
+        return await this.requestOnce<TResult, TPayload>(action, payload, timeout);
+      } catch (error) {
+        if (error instanceof ConnectionClosedError) sent ||= error.sent;
+        if (error instanceof RequestTimeoutError) sent = true;
+        const canRetry = !this.closedByClient && !this.disposed && generation === this.closeGeneration;
+        if (canRetry && error instanceof ConnectionClosedError && connectionRetries > 0) connectionRetries--;
+        else if (canRetry && error instanceof RequestTimeoutError && timeoutRetries > 0) timeoutRetries--;
+        else throw error instanceof ConnectionClosedError ? new ConnectionClosedError(error.message, sent) : error;
+
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            this.retryTimers.delete(timer);
+            resolve();
+          }, Math.random() * jitter);
+          this.retryTimers.set(timer, message => reject(new ConnectionClosedError(message, sent)));
+        });
+        // An explicit close stays terminal for this request even if the client was reopened meanwhile.
+        if (generation !== this.closeGeneration) throw new ConnectionClosedError("Request retry cancelled because the client was closed", sent);
+      }
+    }
+  }
+
+  private requestOnce<TResult, TPayload>(action: string, payload: TPayload | undefined, timeoutMs?: number): Promise<TResult> {
     const request: DarkWsRequest<TPayload> = {
       id: createId(),
       action,
@@ -238,6 +298,7 @@ export default class DarkWs {
     return new Promise<TResult>((resolve, reject) => {
       const resolver: RequestResolver = {
         request,
+        sent: false,
         resolve: (value) => resolve(value as TResult),
         reject,
       };
@@ -262,6 +323,7 @@ export default class DarkWs {
     const result = new Promise<void>((resolve, reject) => {
       const resolver: RequestResolver = {
         request: { id: createId(), action },
+        sent: false,
         control: true,
         resolve: () => resolve(),
         reject,
@@ -279,6 +341,8 @@ export default class DarkWs {
       throw new RangeError("Close code must be 1000 or an integer from 3000 to 4999");
     }
     this.closedByClient = true;
+    this.closeGeneration++;
+    this.cancelRetries("WebSocket connection was closed by the client");
     this.clearReconnectTimer();
     this.clearPingTimer();
     this.rejectConnectionWaiters(new ConnectionClosedError("WebSocket connection was closed by the client"));
@@ -294,6 +358,8 @@ export default class DarkWs {
     }
     this.disposed = true;
     this.closedByClient = true;
+    this.closeGeneration++;
+    this.cancelRetries("DarkWs client was disposed");
     this.visibilityDocument?.removeEventListener("visibilitychange", this.onVisibilityChange);
     this.clearReconnectTimer();
     this.clearPingTimer();
@@ -428,6 +494,7 @@ export default class DarkWs {
       this.assertSocketOpen(socket);
       if (control) this.controlRequest = resolver;
       socket.send(control ? control.text : JSON.stringify(resolver.request));
+      resolver.sent = true;
       this.emit("send", resolver.request);
       if (!this.requests.has(resolver.request.id)) {
         return;
@@ -447,7 +514,9 @@ export default class DarkWs {
     } catch (error) {
       const ambiguousSocket = control && this.controlRequest === resolver ? resolver.socket : undefined;
       this.clearResolver(resolver.request.id, resolver);
-      resolver.reject(error instanceof Error ? error : new Error(String(error)));
+      resolver.reject(error instanceof ConnectionClosedError
+        ? new ConnectionClosedError(error.message, resolver.sent || error.sent)
+        : error instanceof Error ? error : new Error(String(error)));
       if (ambiguousSocket) {
         this.rejectRequestsFor(ambiguousSocket);
         ambiguousSocket.close(1000);
@@ -494,16 +563,24 @@ export default class DarkWs {
     for (const [id, resolver] of this.requests) {
       if (resolver.socket === socket) {
         this.clearResolver(id, resolver);
-        resolver.reject(new ConnectionClosedError("Request cancelled because the WebSocket connection closed"));
+        resolver.reject(new ConnectionClosedError("Request cancelled because the WebSocket connection closed", resolver.sent));
       }
     }
   }
 
-  private rejectAll(error: Error): void {
+  private rejectAll(error: ConnectionClosedError): void {
     for (const [id, resolver] of this.requests) {
       this.clearResolver(id, resolver);
-      resolver.reject(error);
+      resolver.reject(new ConnectionClosedError(error.message, resolver.sent));
     }
+  }
+
+  private cancelRetries(message: string): void {
+    for (const [timer, reject] of this.retryTimers) {
+      clearTimeout(timer);
+      reject(message);
+    }
+    this.retryTimers.clear();
   }
 
   private clearResolver(id: string, resolver: RequestResolver): void {

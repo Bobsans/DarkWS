@@ -415,6 +415,20 @@ client.dispose();
 `dispose()` is terminal: it stops reconnect and ping timers, closes the socket,
 and rejects pending requests.
 
+Requests also accept `request(action, data, { timeout, retry })`; the existing
+numeric third-argument timeout remains supported. `timeout` is the reply deadline
+per attempt in milliseconds. `retry: { connectionClosed: 2, timeout: 1, jitter: 250 }`
+allows two additional attempts on connection loss, one on timeout, and a random
+delay of up to 250 ms before each retry. Both retry counts and jitter default to
+zero. Counts must be non-negative safe integers; jitter must be finite and within
+0–2147483647 ms. Invalid retry settings reject with `RangeError` before connecting.
+Use retries **only for idempotent actions**: the server may have executed an action
+whose response was lost. Each attempt gets a fresh id, and late replies are ignored.
+`ConnectionClosedError.sent` is true if any attempt reached `WebSocket.send()`,
+even when the last attempt was unsent; this does not confirm server execution.
+Retries may open a connection even with `reconnect: false`, but explicit `close()`
+or `dispose()` cancels them. Control commands and server error replies are not retried.
+
 `authenticate("")` rejects immediately with `TypeError` without connecting or
 sending anything; use `logout()` to sign out. `controlTimeout` sets an independent
 reply deadline for authentication, logout, and automatic session restoration:

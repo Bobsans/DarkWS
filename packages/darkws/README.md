@@ -31,6 +31,43 @@ Requests use `{ id, action, data? }`. The `message` event receives the full flat
 broadcast `{ id: "@", action, data? }`. Update the server and clients together:
 the previous `payload` request field and nested broadcast envelope are incompatible.
 
+Requests accept either the existing numeric timeout or a `DarkWsRequestOptions`
+object as the third argument:
+
+```ts
+const user = await client.request<User>("user:get", { id: "42" }, {
+  timeout: 5000,
+  retry: { connectionClosed: 2, timeout: 1, jitter: 250 },
+});
+```
+
+`timeout` is the reply deadline per attempt in milliseconds (`0` disables it),
+defaulting to `requestTimeout`. `retry.connectionClosed` and `retry.timeout` are
+independent counts of **additional** attempts for `ConnectionClosedError` and
+`RequestTimeoutError`; both default to `0`. `retry.jitter` defaults to `0` and adds
+a random delay from zero up to that many milliseconds before each retry. Counts
+must be non-negative safe integers; jitter must be finite and between `0` and
+`2147483647`. Invalid retry options reject with `RangeError` before connecting.
+
+Enable retries **only for idempotent actions**, typically reads. Each attempt has
+a new request id; a late reply to an earlier attempt is ignored. A timeout or
+disconnect can occur after the server executed the action, so retrying a mutation
+can execute it twice. Server error replies and other send errors are not retried.
+Authentication/logout commands do not use this request retry policy.
+
+For a request, `ConnectionClosedError.sent` is `true` if **any** attempt was
+accepted by `WebSocket.send()`, even when the final attempt was unsent. It does
+not confirm server receipt or execution. `false` means no attempt was sent, so
+retrying cannot duplicate that request's execution. The error constructor's
+optional second argument defaults to `false` for backward compatibility.
+
+Retries use the normal connection hooks, gates, and session restoration, and may
+open a connection even with background reconnection disabled (`reconnect: false`).
+`waitConnectionTimeout` applies to each connection wait, separately from the reply
+deadline and jitter. Explicit `close()` and `dispose()` cancel retries and their
+timers, including if `connect()` is called again immediately. Pending retry delays
+are included in `pendingRequestCount`.
+
 `authenticate(token)` waits for a server acknowledgement and rejects authentication
 errors. `authenticate("")` rejects immediately with `TypeError`, without connecting
 or sending a command. Use `logout()` to sign out: it clears the current server

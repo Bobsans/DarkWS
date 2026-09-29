@@ -8,4 +8,6 @@ export type {
   DarkWsEvents,
   DarkWsOptions,
   DarkWsRequest,
+  DarkWsRequestOptions,
+  DarkWsRetryOptions,
 } from "./dark-ws.js";

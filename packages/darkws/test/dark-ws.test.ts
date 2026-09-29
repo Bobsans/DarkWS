@@ -86,6 +86,7 @@ describe("DarkWs", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
@@ -122,7 +123,7 @@ describe("DarkWs", () => {
     const client = createClient().connect();
     const socket = MockWebSocket.instances[0];
     const request = client.request("waiting");
-    const rejected = expect(request).rejects.toBeInstanceOf(ConnectionClosedError);
+    const rejected = expect(request).rejects.toMatchObject({ name: "ConnectionClosedError", sent: false });
     socket.open();
     client.close();
     await rejected;
@@ -310,7 +311,7 @@ describe("DarkWs", () => {
     await Promise.resolve();
     socket.serverClose(false, 1006);
 
-    await expect(request).rejects.toBeInstanceOf(ConnectionClosedError);
+    await expect(request).rejects.toMatchObject({ name: "ConnectionClosedError", sent: true });
     client.dispose();
   });
 
@@ -442,7 +443,7 @@ describe("DarkWs", () => {
     const socket = MockWebSocket.instances[0];
     socket.open();
     const authentication = expect(client.authenticate("test-token")).rejects.toBeInstanceOf(RequestTimeoutError);
-    const queued = expect(client.logout()).rejects.toBeInstanceOf(ConnectionClosedError);
+    const queued = expect(client.logout()).rejects.toMatchObject({ name: "ConnectionClosedError", sent: false });
     await vi.advanceTimersByTimeAsync(10);
     await authentication;
     await queued;
@@ -877,16 +878,212 @@ describe("DarkWs", () => {
     client.dispose();
   });
 
-  it("lets one request override the shared timeout", async () => {
+  it.each([10, { timeout: 10 }])("lets one request override the shared timeout with %j", async options => {
     const client = createClient({ requestTimeout: 1000 }).connect();
     MockWebSocket.instances[0].open();
-    const request = client.request("test:read", undefined, 10);
+    const request = client.request("test:read", undefined, options);
     const rejected = expect(request).rejects.toBeInstanceOf(RequestTimeoutError);
 
     await vi.advanceTimersByTimeAsync(10);
 
     await rejected;
     client.dispose();
+  });
+
+  describe("request retries", () => {
+    beforeEach(() => vi.spyOn(Math, "random").mockReturnValue(0.5));
+
+    it("retries a timeout with a fresh id and ignores the late response", async () => {
+      const client = createClient({ reconnect: false }).connect();
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      const request = client.request<number>("read", { key: "a" }, { timeout: 10, retry: { timeout: 1 } });
+      await vi.advanceTimersByTimeAsync(11);
+      const [first, second] = socket.sent.map(value => JSON.parse(value as string));
+      expect(second).toEqual({ ...first, id: expect.any(String) });
+      expect(second.id).not.toBe(first.id);
+      socket.serverMessage({ id: first.id, data: 1 });
+      expect(client.pendingRequestCount).toBe(1);
+      socket.serverMessage({ id: second.id, data: 2 });
+      await expect(request).resolves.toBe(2);
+      expect(client.pendingRequestCount).toBe(0);
+      client.dispose();
+    });
+
+    it("retries an unsent request after a connection fails to open", async () => {
+      const client = createClient({ reconnect: false }).connect();
+      const request = client.request("read", undefined, { retry: { connectionClosed: 1 } });
+      const first = MockWebSocket.instances[0];
+      first.serverClose();
+      await vi.advanceTimersByTimeAsync(1);
+      const second = MockWebSocket.instances[1];
+      second.open();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(first.sent).toEqual([]);
+      const sent = JSON.parse(second.sent[0] as string);
+      second.serverMessage({ id: sent.id });
+      await expect(request).resolves.toBeUndefined();
+      client.dispose();
+    });
+
+    it("keeps independent connection and timeout retry budgets", async () => {
+      const client = createClient({ reconnect: false }).connect();
+      const first = MockWebSocket.instances[0];
+      first.open();
+      const rejected = expect(client.request("read", undefined, {
+        timeout: 10, retry: { connectionClosed: 1, timeout: 1 },
+      })).rejects.toMatchObject({ name: "ConnectionClosedError", sent: true });
+      await vi.advanceTimersByTimeAsync(0);
+      first.serverClose();
+      await vi.advanceTimersByTimeAsync(1);
+      const second = MockWebSocket.instances[1];
+      second.open();
+      await vi.advanceTimersByTimeAsync(11);
+      expect(first.sent).toHaveLength(1);
+      expect(second.sent).toHaveLength(2);
+      second.serverClose();
+      await rejected;
+      await vi.advanceTimersByTimeAsync(100);
+      expect(MockWebSocket.instances).toHaveLength(2);
+      expect(client.pendingRequestCount).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+      client.dispose();
+    });
+
+    it("stops after the timeout retry budget is exhausted", async () => {
+      const client = createClient().connect();
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      const rejected = expect(client.request("read", undefined, {
+        timeout: 10, retry: { timeout: 1, connectionClosed: 3 },
+      })).rejects.toBeInstanceOf(RequestTimeoutError);
+      await vi.advanceTimersByTimeAsync(22);
+      await rejected;
+      expect(socket.sent).toHaveLength(2);
+      expect(client.pendingRequestCount).toBe(0);
+      client.dispose();
+    });
+
+    it("delays retries by a random amount up to jitter milliseconds", async () => {
+      const client = createClient().connect();
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      const request = client.request("read", undefined, { timeout: 10, retry: { timeout: 1, jitter: 100 } });
+      await vi.advanceTimersByTimeAsync(59);
+      expect(socket.sent).toHaveLength(1);
+      expect(client.pendingRequestCount).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(socket.sent).toHaveLength(2);
+      socket.serverMessage({ id: JSON.parse(socket.sent[1] as string).id });
+      await request;
+      client.dispose();
+    });
+
+    it.each(["connection", "timeout"])("remembers a sent %s attempt if the next attempt was unsent", async failure => {
+      const client = createClient({ reconnect: false }).connect();
+      const first = MockWebSocket.instances[0];
+      first.open();
+      const rejected = expect(client.request("read", undefined, {
+        timeout: 10,
+        retry: { connectionClosed: failure === "connection" ? 1 : 0, timeout: failure === "timeout" ? 1 : 0, jitter: 10 },
+      })).rejects.toMatchObject({ name: "ConnectionClosedError", sent: true });
+      await vi.advanceTimersByTimeAsync(failure === "timeout" ? 10 : 0);
+      first.serverClose();
+      await vi.advanceTimersByTimeAsync(5);
+      const second = MockWebSocket.instances[1];
+      second.serverClose();
+      await rejected;
+      expect(first.sent).toHaveLength(1);
+      expect(second.sent).toEqual([]);
+      client.dispose();
+    });
+
+    it.each(["close", "dispose"] as const)("cancels jitter timers and pending retries on %s", async method => {
+      const client = createClient().connect();
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      const rejected = expect(client.request("read", undefined, {
+        timeout: 10, retry: { timeout: 2, jitter: 1000 },
+      })).rejects.toMatchObject({ name: "ConnectionClosedError", sent: true });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(client.pendingRequestCount).toBe(1);
+      client[method]();
+      await rejected;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(socket.sent).toHaveLength(1);
+      expect(client.pendingRequestCount).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+      client.dispose();
+    });
+
+    it.each([false, true])("does not revive a request across close/connect (retry timer fired: %s)", async timerFired => {
+      const client = createClient({ reconnect: false }).connect();
+      const first = MockWebSocket.instances[0];
+      first.open();
+      const rejected = expect(client.request("read", undefined, {
+        timeout: 10, retry: { connectionClosed: 2, timeout: 2, jitter: 100 },
+      })).rejects.toMatchObject({ name: "ConnectionClosedError", sent: true });
+      await vi.advanceTimersByTimeAsync(timerFired ? 10 : 0);
+      if (timerFired) vi.advanceTimersByTime(50);
+      else first.serverClose();
+      client.close();
+      client.connect();
+      const second = MockWebSocket.instances[1];
+      second.open();
+      await rejected;
+      await vi.advanceTimersByTimeAsync(100);
+      expect(first.sent).toHaveLength(1);
+      expect(second.sent).toEqual([]);
+      expect(client.pendingRequestCount).toBe(0);
+      client.dispose();
+    });
+
+    it.each(["server", "send"])("does not retry %s errors", async failure => {
+      const client = createClient().connect();
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      const send = vi.spyOn(socket, "send");
+      if (failure === "send") send.mockImplementation(() => { throw new Error("send failed"); });
+      const request = client.request("read", undefined, { retry: { connectionClosed: 2, timeout: 2 } });
+      const rejected = expect(request).rejects.toThrow(failure === "server" ? "denied" : "send failed");
+      await vi.advanceTimersByTimeAsync(0);
+      if (failure === "server") socket.serverMessage({ id: JSON.parse(socket.sent[0] as string).id, error: "denied" });
+      await rejected;
+      await vi.advanceTimersByTimeAsync(100);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(client.pendingRequestCount).toBe(0);
+      client.dispose();
+    });
+
+    it.each([
+      { connectionClosed: -1 }, { connectionClosed: Infinity }, { timeout: 0.5 },
+      { jitter: -1 }, { jitter: NaN }, { jitter: 2147483648 },
+    ])("rejects invalid retry options before connecting: %j", async retry => {
+      const client = createClient();
+      await expect(client.request("read", undefined, { retry })).rejects.toBeInstanceOf(RangeError);
+      expect(MockWebSocket.instances).toHaveLength(0);
+      expect(client.pendingRequestCount).toBe(0);
+      client.dispose();
+    });
+
+    it("distinguishes sent and unsent requests during disposal", async () => {
+      const client = createClient().connect();
+      MockWebSocket.instances[0].open();
+      const sent = expect(client.request("sent")).rejects.toMatchObject({ name: "ConnectionClosedError", sent: true });
+      await vi.advanceTimersByTimeAsync(0);
+      const unsent = expect(client.request("unsent")).rejects.toMatchObject({ name: "ConnectionClosedError", sent: false });
+      client.dispose();
+      await Promise.all([sent, unsent]);
+      expect(client.pendingRequestCount).toBe(0);
+    });
+
+    it("marks a request sent before invoking send listeners", async () => {
+      const client = createClient().connect();
+      MockWebSocket.instances[0].open();
+      client.on("send", () => client.close());
+      await expect(client.request("read")).rejects.toMatchObject({ name: "ConnectionClosedError", sent: true });
+      client.dispose();
+    });
   });
 
   it("sends raw strings without JSON encoding", async () => {

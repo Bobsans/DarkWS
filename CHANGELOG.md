@@ -8,6 +8,14 @@ include migration guidance before a release is published.
 
 ### Added
 
+- Browser request options `{ timeout, retry: { connectionClosed, timeout, jitter } }`
+  with independent retry budgets and random delay in milliseconds. Retries are
+  disabled by default and must only be enabled for idempotent actions. Each attempt
+  uses a fresh id; explicit close/disposal cancels pending retries. Numeric request
+  timeouts remain supported. Exported `DarkWsRequestOptions` and `DarkWsRetryOptions`.
+- `ConnectionClosedError.sent` reports whether any attempt of the request was
+  accepted by the socket, including when the final attempt was unsent. This does
+  not acknowledge server execution.
 - Browser client `controlTimeout` independently limits authentication/logout
   replies, including automatic session restore. Default 30 seconds; `0` disables
   the deadline, which starts when each command is sent.
