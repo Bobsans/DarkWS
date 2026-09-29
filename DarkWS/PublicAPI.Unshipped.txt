@@ -1,4 +1,8 @@
 #nullable enable
+DarkWS.DarkWsOptions.AcceptAnonymousOnUpgradeAuthenticationException.get -> bool
+DarkWS.DarkWsOptions.AcceptAnonymousOnUpgradeAuthenticationException.set -> void
+DarkWS.DarkWsOptions.KeepSessionOnFailedAuthentication.get -> bool
+DarkWS.DarkWsOptions.KeepSessionOnFailedAuthentication.set -> void
 DarkWS.DarkWsBroadcast.Except.get -> DarkWS.DarkWsBroadcastExclusion?
 DarkWS.DarkWsBroadcast.Except.init -> void
 DarkWS.DarkWsBroadcast.Groups.get -> System.Collections.Generic.IReadOnlyList<string!>?

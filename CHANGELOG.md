@@ -8,6 +8,10 @@ include migration guidance before a release is published.
 
 ### Added
 
+- `DarkWsOptions.AcceptAnonymousOnUpgradeAuthenticationException` (default false)
+  and `KeepSessionOnFailedAuthentication` (default false). Failed `auth:` commands
+  can retain the current session, principal, and indexes without a lifecycle hook;
+  the response stays `auth:failed`, and explicit logout always clears the session.
 - Group broadcast connection/session exclusions and `BroadcastToGroupsAsync` on
   `IBroadcaster` and `HandlerBase`, with one publication and deduplicated recipients.
 - `DarkWS.Testing`: direct handler context initialization, captured responses and
@@ -33,6 +37,8 @@ include migration guidance before a release is published.
 
 ### Changed
 
+- Authenticator exceptions during upgrade are logged and return HTTP 401 instead
+  of escaping as server errors. Request/shutdown cancellation is propagated.
 - AUD-03: The server keeps reading a saturated connection. Up to
   `MaxConcurrentRequestsPerConnection` requests run and as many more wait in arrival
   order together with `auth:`/`logout`; text `ping` and transport PONGs are handled
@@ -49,6 +55,10 @@ include migration guidance before a release is published.
 
 ### Migration
 
+- To accept anonymous connections after upgrade authenticator exceptions, opt into
+  `AcceptAnonymousOnUpgradeAuthenticationException`. Normal null results still allow
+  anonymous upgrade. Enable `KeepSessionOnFailedAuthentication` only when the host
+  continues to enforce the retained session's expiry and revocation.
 - Upgrade all server and Redis packages sharing a channel before using group unions
   or exclusions. Their Groups=4 envelope adds `groups` and `except`; old nodes reject
   it. Existing single-target messages are unchanged. Custom `IBroadcaster`

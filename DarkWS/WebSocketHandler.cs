@@ -277,7 +277,12 @@ internal sealed class WebSocketHandler(
             Log.AuthenticationFailed(logger, error);
         }
 
-        await SetSessionAsync(connection, session, cancellationToken);
+        if (session is not null || !_options.KeepSessionOnFailedAuthentication) {
+            await SetSessionAsync(connection, session, cancellationToken);
+        } else {
+            // A rejecting authenticator may have changed HttpContext.User; restore the retained identity.
+            connection.HttpContext.User = connection.Session?.User ?? new ClaimsPrincipal(new ClaimsIdentity());
+        }
         return session is not null;
     }
 

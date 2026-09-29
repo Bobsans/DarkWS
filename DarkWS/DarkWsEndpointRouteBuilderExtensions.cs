@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace DarkWS;
@@ -33,7 +34,20 @@ public static class DarkWsEndpointRouteBuilderExtensions {
 
             var token = context.Request.Query[options.AuthenticationQueryParameter].FirstOrDefault();
             var authenticator = context.RequestServices.GetRequiredService<IDarkWsAuthenticator>();
-            var session = await authenticator.AuthenticateAsync(context, token, cancellation.Token);
+            IDarkWsSession? session = null;
+            try {
+                session = await authenticator.AuthenticateAsync(context, token, cancellation.Token);
+            } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
+                throw;
+            } catch (Exception error) {
+                context.RequestServices.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger(typeof(DarkWsEndpointRouteBuilderExtensions))
+                    .LogWarning(error, "DarkWS upgrade authentication failed");
+                if (!options.AcceptAnonymousOnUpgradeAuthenticationException) {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return;
+                }
+            }
             // HttpContext.User follows the authenticator's decision, as it does after auth:/logout.
             context.User = session?.User ?? new ClaimsPrincipal(new ClaimsIdentity());
 

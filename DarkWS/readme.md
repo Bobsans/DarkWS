@@ -150,11 +150,22 @@ handler token.
 
 System commands are plain text: `auth:<token>` receives `auth:success` or
 `auth:failed`; `logout` receives `logout:success`; `ping` receives `pong`.
-Rejected authentication and logout clear the previous session. `OnAuthenticatedAsync`
-runs after success, rejection, and logout, and its current session can be null.
+Rejected authentication clears the previous session by default.
+`KeepSessionOnFailedAuthentication = true` retains the session, HTTP principal, and
+membership indexes after a rejected/empty token or authenticator exception, while
+still replying `auth:failed`. No `OnAuthenticatedAsync` hook runs for an unchanged
+session. Successful authentication replaces the session; explicit logout always
+clears it. Both notify `OnAuthenticatedAsync`, as does rejection with the default
+setting, and the hook's current session can be null.
+
+During upgrade, authenticator exceptions are logged and return HTTP 401 by default.
+`AcceptAnonymousOnUpgradeAuthenticationException = true` instead accepts an anonymous
+connection with no session. A null authenticator result continues to allow anonymous
+upgrade regardless of this option. Request/shutdown cancellation is propagated.
 JSON authentication/logout actions and `@auth` replies are no longer used.
 The legacy `AuthenticationFailedError` option does not customize text replies.
-Token expiry and revocation enforcement remain the application's responsibility;
+Token expiry and revocation enforcement remain the application's responsibility,
+including when a failed refresh retains the previous session;
 already running actions are not rolled back.
 
 Session and group indexes refresh on registration and re-authentication. Re-add

@@ -347,17 +347,29 @@ public sealed class AuditRemediationTests {
         await accept.WaitAsync(TimeSpan.FromSeconds(2));
     }
 
-    [Test]
-    public async Task UpgradeUserFollowsTheAuthenticatorDecision() {
+    [TestCase(false, false)]
+    [TestCase(true, false)]
+    [TestCase(true, true)]
+    public async Task UpgradeUserFollowsTheAuthenticatorDecision(bool throws, bool acceptAnonymous) {
+        var probe = new Probe();
         using var host = await new HostBuilder().ConfigureWebHost(builder => builder
             .UseTestServer()
             .ConfigureServices(services => {
                 services.AddRouting();
-                services.AddSingleton(new Probe());
+                services.AddSingleton(probe);
+                services.AddLogging(logging => logging.AddProvider(probe));
                 services.AddScoped<ScopeLifetime>();
                 services.AddScoped<AuditHandler>();
-                services.AddDarkWs();
-                services.AddScoped<IDarkWsAuthenticator, RejectingAuthenticator>();
+                services.AddDarkWs(options => {
+                    if (acceptAnonymous) {
+                        options.AcceptAnonymousOnUpgradeAuthenticationException = true;
+                    }
+                });
+                if (throws) {
+                    services.AddScoped<IDarkWsAuthenticator, AuditAuthenticator>();
+                } else {
+                    services.AddScoped<IDarkWsAuthenticator, RejectingAuthenticator>();
+                }
             })
             .Configure(app => {
                 app.UseRouting();
@@ -370,10 +382,42 @@ public sealed class AuditRemediationTests {
                 app.UseEndpoints(endpoints => endpoints.MapDarkWs());
             })).StartAsync();
         host.Services.GetRequiredService<DarkWsActionRegistry>().Add(typeof(AuditHandler));
-        using var socket = await host.GetTestServer().CreateWebSocketClient().ConnectAsync(new Uri("ws://localhost/ws"), CancellationToken.None);
-        await socket.SendTextAsync("{\"id\":\"user\",\"action\":\"audit:user-authenticated\"}");
-        Assert.That(await socket.ReceiveMessage<ResponseMessage<bool>>(), Is.EqualTo(new ResponseMessage<bool>("user", false)));
+        var client = host.GetTestServer().CreateWebSocketClient();
+        var uri = new Uri("ws://localhost/ws?token=throws");
+        if (throws && !acceptAnonymous) {
+            var error = Assert.ThrowsAsync<InvalidOperationException>(async () => await client.ConnectAsync(uri, CancellationToken.None));
+            Assert.That(error!.Message, Does.Contain("401"));
+            Assert.That(host.Services.GetRequiredService<ConnectionStorage>().GetAll(), Is.Empty);
+        } else {
+            using var socket = await client.ConnectAsync(uri, CancellationToken.None);
+            await socket.SendTextAsync("{\"id\":\"user\",\"action\":\"audit:user-authenticated\"}");
+            Assert.That(await socket.ReceiveMessage<ResponseMessage<bool>>(), Is.EqualTo(new ResponseMessage<bool>("user", false)));
+            Assert.That(host.Services.GetRequiredService<ConnectionStorage>().GetAll().Single().Session, Is.Null);
+        }
+        Assert.That(probe.Logs.Count(message => message == "DarkWS upgrade authentication failed"), Is.EqualTo(throws ? 1 : 0));
         await host.StopAsync();
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task UpgradeCancellationIsNotTreatedAsAuthenticationFailure(bool acceptAnonymous) {
+        var probe = new Probe();
+        using var host = await Setup.CreateBuilder((services, _) => {
+            services.AddSingleton(probe);
+            services.AddLogging(logging => logging.AddProvider(probe));
+            services.AddScoped<IDarkWsAuthenticator, AuditAuthenticator>();
+            services.Configure<DarkWsOptions>(options => options.AcceptAnonymousOnUpgradeAuthenticationException = acceptAnonymous);
+        }).StartAsync();
+        using var cancellation = new CancellationTokenSource();
+        var connecting = host.GetTestServer().CreateWebSocketClient()
+            .ConnectAsync(new Uri("ws://localhost/ws?token=wait-for-cancellation"), cancellation.Token);
+        await probe.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        Assert.CatchAsync<OperationCanceledException>(async () => await connecting);
+        await probe.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await host.StopAsync();
+        Assert.That(probe.Logs, Has.None.EqualTo("DarkWS upgrade authentication failed"));
+        Assert.That(host.Services.GetRequiredService<ConnectionStorage>().GetAll(), Is.Empty);
     }
 
     [Test]
@@ -430,32 +474,55 @@ public sealed class AuditRemediationTests {
         Assert.That(JsonSerializer.Deserialize<DarkWsBroadcast>(explicitNull, options)!.Data?.ValueKind, Is.EqualTo(JsonValueKind.Null));
     }
 
-    [Test]
-    public async Task AuthenticationFailureAndLogoutClearSessionAndIndexesWithoutClosing() {
-        await using var provider = CreateProvider();
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task AuthenticationFailureHonorsRetentionAndLogoutAlwaysClearsSession(bool keepSession) {
+        var hook = new AuthenticationHook();
+        await using var provider = CreateProvider(options => {
+            if (keepSession) {
+                options.KeepSessionOnFailedAuthentication = true;
+            }
+        }, services => services.AddSingleton<DarkWsMiddleware>(hook));
         var socket = new TestWebSocket();
         var connection = CreateConnection(provider, socket);
         var storage = provider.GetRequiredService<ConnectionStorage>();
         var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(connection);
-        foreach (var token in new[] { "first", "rejected", "second", "", "third", "throws", "last" }) {
+        string? expectedSession = null;
+        var expectedHooks = 0;
+        foreach (var token in new[] { "rejected", "throws", "", "first", "rejected", "second", "", "third", "throws", "last" }) {
             socket.EnqueueReceive("auth:" + token);
             await UntilAsync(() => socket.Sent.Count == 1);
             socket.Sent.TryDequeue(out var bytes);
             var valid = token is "first" or "second" or "third" or "last";
+            if (valid || !keepSession) {
+                expectedSession = valid ? token : null;
+                expectedHooks++;
+            }
             Assert.That(Encoding.UTF8.GetString(bytes!), Is.EqualTo(valid ? "auth:success" : "auth:failed"));
-            Assert.That(connection.Session?.Id, Is.EqualTo(valid ? token : null));
-            Assert.That(connection.HttpContext.User.Identity?.IsAuthenticated, Is.EqualTo(valid));
-            Assert.That(storage.GetByGroup("session:first"), valid && token == "first" ? Has.Count.EqualTo(1) : Is.Empty);
+            Assert.That(connection.Session?.Id, Is.EqualTo(expectedSession));
+            Assert.That(connection.HttpContext.User.Identity?.IsAuthenticated, Is.EqualTo(expectedSession is not null));
+            if (connection.Session is not null) {
+                Assert.That(connection.HttpContext.User, Is.SameAs(connection.Session.User));
+            }
+            foreach (var sessionId in new[] { "first", "second", "third", "last" }) {
+                Assert.That(storage.GetBySession(sessionId), Has.Count.EqualTo(sessionId == expectedSession ? 1 : 0));
+                Assert.That(storage.GetByGroup("session:" + sessionId), Has.Count.EqualTo(sessionId == expectedSession ? 1 : 0));
+            }
+            Assert.That(hook.Calls, Is.EqualTo(expectedHooks));
         }
 
         socket.EnqueueReceive("logout");
         await UntilAsync(() => socket.Sent.Count == 1);
         Assert.That(Encoding.UTF8.GetString(socket.Sent.Single()), Is.EqualTo("logout:success"));
         Assert.That(connection.Session, Is.Null);
+        Assert.That(connection.HttpContext.User.Identity?.IsAuthenticated, Is.False);
         Assert.That(storage.GetBySession("last"), Is.Empty);
+        Assert.That(storage.GetByGroup("session:last"), Is.Empty);
+        Assert.That(hook.Calls, Is.EqualTo(expectedHooks + 1));
         Assert.That(connection.IsOpen, Is.True);
         // Every non-empty auth: token resolves the authenticator from its own scope.
-        Assert.That(provider.GetRequiredService<Probe>().Authenticators, Is.EqualTo(6));
+        Assert.That(provider.GetRequiredService<Probe>().Authenticators, Is.EqualTo(8));
+        Assert.That(provider.GetRequiredService<Probe>().Logs.Count(message => message == "Re-authentication failed"), Is.EqualTo(2));
         socket.EnqueueClose();
         await accept.WaitAsync(TimeSpan.FromSeconds(2));
     }
@@ -493,6 +560,7 @@ public sealed class AuditRemediationTests {
         public bool ScopeDisposed;
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Cancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ConcurrentQueue<string> Logs { get; } = new();
         public ILogger CreateLogger(string categoryName) => this;
         public void Dispose() { }
@@ -509,6 +577,14 @@ public sealed class AuditRemediationTests {
             try { await Task.Delay(Timeout.Infinite, context.ConnectionAborted); } catch (OperationCanceledException) { }
 
             CancelledOnEntry.TrySetResult(cancelled);
+        }
+    }
+
+    public sealed class AuthenticationHook : DarkWsMiddleware {
+        public int Calls;
+        public override Task OnAuthenticatedAsync(IDarkWsContextAccessor context, IDarkWsSession? previousSession) {
+            Calls++;
+            return Task.CompletedTask;
         }
     }
 
@@ -617,14 +693,25 @@ public sealed class AuditRemediationTests {
     public sealed record Payload(string Text);
 
     public sealed class AuditAuthenticator : IDarkWsAuthenticator {
-        public AuditAuthenticator(Probe probe) => Interlocked.Increment(ref probe.Authenticators);
+        private readonly Probe _probe;
+        public AuditAuthenticator(Probe probe) {
+            _probe = probe;
+            Interlocked.Increment(ref probe.Authenticators);
+        }
 
-        public ValueTask<IDarkWsSession?> AuthenticateAsync(HttpContext context, string? token, CancellationToken cancellationToken) {
+        public async ValueTask<IDarkWsSession?> AuthenticateAsync(HttpContext context, string? token, CancellationToken cancellationToken) {
+            if (token == "wait-for-cancellation") {
+                _probe.Started.TrySetResult();
+                try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); } finally { _probe.Cancelled.TrySetResult(); }
+            }
+            if (token is "rejected" or "throws") {
+                context.User = new ClaimsPrincipal(new ClaimsIdentity([], "ChangedByAuthenticator"));
+            }
             if (token == "throws") {
                 throw new InvalidOperationException("test authentication failure");
             }
 
-            return ValueTask.FromResult<IDarkWsSession?>(string.IsNullOrEmpty(token) || token == "rejected" ? null : new TestSession(token, new ClaimsPrincipal(new ClaimsIdentity([], "Test"))));
+            return string.IsNullOrEmpty(token) || token == "rejected" ? null : new TestSession(token, new ClaimsPrincipal(new ClaimsIdentity([], "Test")));
         }
     }
 

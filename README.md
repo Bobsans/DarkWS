@@ -461,9 +461,22 @@ Request ids must be non-empty and must not be `@` or `@auth`. A request using a
 reserved id is rejected without invoking its action. The `invalid-request` response
 uses an empty id because echoing a reserved id would turn it into a control event.
 
-Authentication rejection clears the previous session and principal. Logout also
-clears the session. Both changes notify `OnAuthenticatedAsync`, whose current
+Upgrade authenticator exceptions are logged as warnings and return HTTP 401 by
+default. Set `AcceptAnonymousOnUpgradeAuthenticationException = true` to accept
+the socket with a null session and anonymous principal instead. Returning null
+from the authenticator still permits an anonymous upgrade as before; the option
+applies only to exceptions. Request/shutdown cancellation is not treated as an
+authentication failure.
+
+By default, failed `auth:` commands (rejection, an empty token, or an exception)
+clear the previous session and principal. Set `KeepSessionOnFailedAuthentication = true`
+to retain the current session, principal, and membership indexes. The reply remains
+`auth:failed`, and `OnAuthenticatedAsync` is not called for the unchanged session.
+Successful authentication still replaces the session. Explicit `logout` always
+clears it. Replacements and clearing notify `OnAuthenticatedAsync`, whose current
 session may now be null. Already running actions are not rolled back by logout.
+Session retention does not validate or extend the previous session's lifetime;
+the application must still enforce expiry and revocation.
 JSON actions `darkws:authenticate` / `darkws:logout` are no longer system commands, and
 `@auth` replies are no longer emitted. `@auth` remains a reserved legacy request id.
 The legacy `AuthenticationFailedError` option does not customize `auth:failed`.

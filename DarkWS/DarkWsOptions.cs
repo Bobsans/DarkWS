@@ -40,6 +40,12 @@ public sealed class DarkWsOptions {
     /// <summary>Connection token query parameter. Default token; must not be blank.</summary>
     public string AuthenticationQueryParameter { get; set; } = "token";
 
+    /// <summary>Accepts an anonymous WebSocket when upgrade authentication throws. Default false returns HTTP 401. Request/shutdown cancellation is always propagated.</summary>
+    public bool AcceptAnonymousOnUpgradeAuthenticationException { get; set; }
+
+    /// <summary>Keeps the current session, HTTP user, and membership indexes when auth: is rejected or throws. Default false clears them. Failed attempts still return auth:failed; explicit logout always clears the session.</summary>
+    public bool KeepSessionOnFailedAuthentication { get; set; }
+
     /// <summary>Unknown action error code. Default darkws:error:invalid-action.</summary>
     public string InvalidActionError { get; set; } = "darkws:error:invalid-action";
 
