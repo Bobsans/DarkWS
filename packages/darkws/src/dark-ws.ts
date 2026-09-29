@@ -109,6 +109,11 @@ export class RequestTimeoutError extends Error {
 export default class DarkWs {
   static readonly LOG_PREFIX = "[DarkWs]";
 
+  /** Creates a facade that builds its client on first use and connects it on the first request or subscription. */
+  static lazy(options: DarkWsOptions | (() => DarkWsOptions)): LazyDarkWs {
+    return new LazyDarkWs(options);
+  }
+
   private readonly listeners: {
     [K in keyof DarkWsEvents]: ((...args: DarkWsEvents[K]) => void)[]
   } = {
@@ -715,5 +720,120 @@ export default class DarkWs {
     if (this.options.debug) {
       console.debug(DarkWs.LOG_PREFIX, ...args);
     }
+  }
+}
+
+interface LazySubscription {
+  // Set only for on(); onAction() subscriptions cannot be removed by off().
+  event?: keyof DarkWsEvents;
+  callback?: unknown;
+  attach: (client: DarkWs) => () => void;
+  detach?: () => void;
+}
+
+/** A client created on first use; subscriptions are kept by the facade and survive reset(). */
+export class LazyDarkWs {
+  private client?: DarkWs;
+  private started = false;
+  private readonly subscriptions: LazySubscription[] = [];
+
+  constructor(private readonly options: DarkWsOptions | (() => DarkWsOptions)) {}
+
+  /** The current client, created (without connecting) if needed. Close it through the facade. */
+  public get instance(): DarkWs {
+    if (!this.client) {
+      const client = new DarkWs(typeof this.options === "function" ? this.options() : this.options);
+      for (const subscription of this.subscriptions) subscription.detach = subscription.attach(client);
+      this.client = client;
+    }
+    return this.client;
+  }
+
+  public async request<TResult, TPayload = unknown>(
+    action: string,
+    payload?: TPayload,
+    options?: number | DarkWsRequestOptions,
+  ): Promise<TResult> {
+    return this.connected().request<TResult, TPayload>(action, payload, options);
+  }
+
+  public async send<T>(data: T, jsonify = true): Promise<void> {
+    return this.connected().send(data, jsonify);
+  }
+
+  public async authenticate(token: string): Promise<void> {
+    return this.connected().authenticate(token);
+  }
+
+  public async logout(): Promise<void> {
+    return this.connected().logout();
+  }
+
+  public on<K extends keyof DarkWsEvents>(
+    event: K,
+    callback: (...args: DarkWsEvents[K]) => void,
+  ): () => void {
+    return this.subscribe({ event, callback, attach: client => client.on(event, callback) });
+  }
+
+  public off<K extends keyof DarkWsEvents>(
+    event: K,
+    callback: (...args: DarkWsEvents[K]) => void,
+  ): void {
+    const subscription = this.subscriptions.find(item => item.event === event && item.callback === callback);
+    if (subscription) this.unsubscribe(subscription);
+  }
+
+  public onAction<TData = unknown>(action: string, callback: (data: TData) => void): () => void {
+    return this.subscribe({ attach: client => client.onAction(action, callback) });
+  }
+
+  public reconnect(): void {
+    this.instance.reconnect();
+    this.started = true;
+  }
+
+  /** Closes the client if it exists; the next request or subscription connects again. */
+  public close(code = 1000): void {
+    this.client?.close(code);
+    this.started = false;
+  }
+
+  /**
+   * Disposes the client, rejecting its pending requests, and re-reads the options on next use.
+   * Subscriptions move to the new client, which connects at once if the old one was started;
+   * `full` also drops them and leaves the facade idle.
+   */
+  public reset(full = false): void {
+    const restart = this.started && !full;
+    this.client?.dispose();
+    this.client = undefined;
+    this.started = false;
+    if (full) this.subscriptions.length = 0;
+    if (restart) this.connected();
+  }
+
+  private connected(): DarkWs {
+    const client = this.instance;
+    if (!this.started) {
+      client.connect();
+      this.started = true;
+    }
+    return client;
+  }
+
+  private subscribe(subscription: LazySubscription): () => void {
+    const client = this.instance;
+    this.subscriptions.push(subscription);
+    subscription.detach = subscription.attach(client);
+    this.connected();
+    return () => this.unsubscribe(subscription);
+  }
+
+  private unsubscribe(subscription: LazySubscription): void {
+    const index = this.subscriptions.indexOf(subscription);
+    if (index < 0) return;
+    this.subscriptions.splice(index, 1);
+    subscription.detach?.();
   }
 }

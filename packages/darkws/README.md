@@ -29,6 +29,41 @@ client.dispose();
 Package ships ESM JavaScript and TypeScript declarations. It has no runtime
 dependencies. Call `dispose()` when the client will not be used again.
 
+`DarkWs.lazy()` returns a facade for an application-wide client that is created
+on first use. Options may be a function, which is called when the client is
+created, so configuration can be read after the module is imported:
+
+```ts
+export const dws = DarkWs.lazy(() => ({
+  secure: config.apiUrl.protocol === "https:",
+  host: config.apiUrl.host,
+  path: "/ws",
+}));
+
+const user = await dws.request<User>("user:get", { id: "42" });
+const unsubscribe = dws.onAction<User>("user:updated", user => console.log(user));
+```
+
+Nothing is created or connected by `DarkWs.lazy()` itself. The first
+`request()`, `send()`, `authenticate()`, `logout()`, `on()`, `onAction()`, or
+`reconnect()` creates the client and connects it; subscribing connects too, so
+server broadcasts are delivered as soon as they arrive. Later calls do not
+connect again and leave automatic reconnection to the client. `instance` returns
+the underlying client, created without connecting, for `connected`,
+`isCurrentSocket()`, and other state.
+
+`close(code)` closes the client if it exists; the next request or subscription
+connects again. Close through the facade rather than `instance.close()`, which
+the facade does not track.
+
+The facade keeps its own subscriptions. `reset()` disposes the client, rejecting
+its pending requests with `ConnectionClosedError`, and the options are read again
+for the next client. Subscriptions move to that client, which connects at once
+if the previous one was started, for example after switching user or server.
+`reset(true)` also drops all subscriptions and leaves the facade idle, as after
+`DarkWs.lazy()`; use it between tests. Unsubscribe functions and `off()` remove
+a subscription from both the current and future clients.
+
 Requests use `{ id, action, data? }`. The `message` event receives the full flat
 broadcast `{ id: "@", action, data? }`. Update the server and clients together:
 the previous `payload` request field and nested broadcast envelope are incompatible.

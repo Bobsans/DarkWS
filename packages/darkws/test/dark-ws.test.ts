@@ -67,7 +67,7 @@ class MockWebSocket {
   }
 }
 
-const createClient = (options: Partial<DarkWsOptions> = {}) => new DarkWs({
+const baseOptions: DarkWsOptions = {
   host: "example.test",
   path: "/ws",
   query: {},
@@ -75,8 +75,9 @@ const createClient = (options: Partial<DarkWsOptions> = {}) => new DarkWs({
   reconnect: true,
   reconnectTimeout: 100,
   pingTimeout: 1000,
-  ...options,
-});
+};
+
+const createClient = (options: Partial<DarkWsOptions> = {}) => new DarkWs({ ...baseOptions, ...options });
 
 describe("DarkWs", () => {
   beforeEach(() => {
@@ -1197,6 +1198,175 @@ describe("DarkWs", () => {
       await loggedOut;
       expect(requestOptions).not.toHaveBeenCalled();
       client.dispose();
+    });
+  });
+
+  describe("lazy client", () => {
+    const reply = (socket: MockWebSocket, index: number, data?: unknown) =>
+      socket.serverMessage({ id: JSON.parse(socket.sent[index] as string).id, data });
+
+    it("creates and connects the client once on the first request", async () => {
+      const options = vi.fn(() => baseOptions);
+      const dws = DarkWs.lazy(options);
+      expect(options).not.toHaveBeenCalled();
+      expect(MockWebSocket.instances).toHaveLength(0);
+      const first = dws.request<number>("first");
+      const second = dws.request<number>("second");
+      expect(MockWebSocket.instances).toHaveLength(1);
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      await vi.advanceTimersByTimeAsync(0);
+      reply(socket, 0, 1);
+      reply(socket, 1, 2);
+      await expect(Promise.all([first, second])).resolves.toEqual([1, 2]);
+      expect(options).toHaveBeenCalledOnce();
+      dws.reset(true);
+    });
+
+    it("connects on subscription and delivers broadcasts", () => {
+      const dws = DarkWs.lazy(baseOptions);
+      const messages: unknown[] = [];
+      const actions: unknown[] = [];
+      dws.on("message", message => messages.push(message));
+      dws.onAction("user:updated", data => actions.push(data));
+      expect(MockWebSocket.instances).toHaveLength(1);
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      socket.serverMessage({ id: "@", action: "user:updated", data: 1 });
+      expect(messages).toEqual([{ id: "@", action: "user:updated", data: 1 }]);
+      expect(actions).toEqual([1]);
+      dws.reset(true);
+    });
+
+    it("connects for send and authentication commands", async () => {
+      const dws = DarkWs.lazy(baseOptions);
+      const sent = dws.send("raw", false);
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      await sent;
+      const authenticated = dws.authenticate("token");
+      await vi.advanceTimersByTimeAsync(0);
+      socket.serverText("auth:success");
+      await authenticated;
+      const loggedOut = dws.logout();
+      await vi.advanceTimersByTimeAsync(0);
+      socket.serverText("logout:success");
+      await loggedOut;
+      expect(socket.sent).toEqual(["raw", "auth:token", "logout"]);
+      dws.reset(true);
+    });
+
+    it("does not bypass reconnect backoff when subscribing again", () => {
+      const dws = DarkWs.lazy(baseOptions);
+      dws.on("open", () => {});
+      MockWebSocket.instances[0].open();
+      MockWebSocket.instances[0].serverClose();
+      dws.onAction("later", () => {});
+      expect(MockWebSocket.instances).toHaveLength(1);
+      vi.advanceTimersByTime(100);
+      expect(MockWebSocket.instances).toHaveLength(2);
+      dws.reset(true);
+    });
+
+    it("connects again after close without creating a client just to close it", async () => {
+      const options = vi.fn(() => baseOptions);
+      const dws = DarkWs.lazy(options);
+      dws.close();
+      expect(options).not.toHaveBeenCalled();
+      dws.on("open", () => {});
+      MockWebSocket.instances[0].open();
+      dws.close();
+      expect(dws.instance.closed).toBe(true);
+      const request = dws.request("read");
+      expect(MockWebSocket.instances).toHaveLength(2);
+      const socket = MockWebSocket.instances[1];
+      socket.open();
+      await vi.advanceTimersByTimeAsync(0);
+      reply(socket, 0, "ok");
+      await expect(request).resolves.toBe("ok");
+      dws.reset(true);
+    });
+
+    it("creates the instance without connecting", () => {
+      const dws = DarkWs.lazy(baseOptions);
+      expect(dws.instance).toBe(dws.instance);
+      expect(dws.instance.closed).toBe(true);
+      expect(MockWebSocket.instances).toHaveLength(0);
+      dws.reset(true);
+    });
+
+    it("restarts a started client on reset with fresh options and kept subscriptions", async () => {
+      const hosts = ["first.test", "second.test"];
+      const dws = DarkWs.lazy(() => ({ ...baseOptions, host: hosts.shift() }));
+      const actions: unknown[] = [];
+      dws.onAction("tick", data => actions.push(data));
+      const previous = dws.instance;
+      MockWebSocket.instances[0].open();
+      const pending = expect(dws.request("read")).rejects.toMatchObject({ message: "DarkWs client was disposed" });
+      dws.reset();
+      await pending;
+      expect(dws.instance).not.toBe(previous);
+      const socket = MockWebSocket.instances[1];
+      expect(socket.url).toBe("ws://second.test/ws");
+      socket.open();
+      socket.serverMessage({ id: "@", action: "tick", data: 2 });
+      expect(actions).toEqual([2]);
+      dws.reset(true);
+    });
+
+    it("does not connect on reset unless the client was started", () => {
+      const dws = DarkWs.lazy(baseOptions);
+      void dws.instance;
+      dws.reset();
+      dws.on("open", () => {});
+      dws.close();
+      dws.reset();
+      expect(MockWebSocket.instances).toHaveLength(1);
+      dws.reset(true);
+    });
+
+    it("drops subscriptions on a full reset", () => {
+      const dws = DarkWs.lazy(baseOptions);
+      const listener = vi.fn();
+      dws.on("open", listener);
+      dws.reset(true);
+      expect(MockWebSocket.instances).toHaveLength(1);
+      dws.reconnect();
+      MockWebSocket.instances[1].open();
+      expect(listener).not.toHaveBeenCalled();
+      dws.reset(true);
+    });
+
+    it("removes unsubscribed listeners from the current and the next client", () => {
+      const dws = DarkWs.lazy(baseOptions);
+      const kept = vi.fn();
+      const removed = vi.fn();
+      const action = vi.fn();
+      dws.on("open", kept);
+      dws.on("open", removed);
+      const unsubscribe = dws.onAction("tick", action);
+      dws.off("open", removed);
+      dws.off("open", removed);
+      unsubscribe();
+      unsubscribe();
+      const first = MockWebSocket.instances[0];
+      first.open();
+      first.serverMessage({ id: "@", action: "tick" });
+      dws.reset();
+      const second = MockWebSocket.instances[1];
+      second.open();
+      second.serverMessage({ id: "@", action: "tick" });
+      expect(kept).toHaveBeenCalledTimes(2);
+      expect(removed).not.toHaveBeenCalled();
+      expect(action).not.toHaveBeenCalled();
+      dws.reset(true);
+    });
+
+    it("reports a failing options factory to the caller", async () => {
+      const dws = DarkWs.lazy(() => { throw new Error("config missing"); });
+      await expect(dws.request("read")).rejects.toThrow("config missing");
+      expect(() => dws.on("open", () => {})).toThrow("config missing");
+      expect(MockWebSocket.instances).toHaveLength(0);
     });
   });
 

@@ -8,6 +8,12 @@ include migration guidance before a release is published.
 
 ### Added
 
+- Browser client `DarkWs.lazy(options | () => options)` returns a `LazyDarkWs`
+  facade that creates its client on first use and connects it on the first
+  request, command, or subscription. It keeps subscriptions across `reset()`,
+  which disposes the client and re-reads the options, restarting it if it was
+  started; `reset(true)` also drops subscriptions. `close()` lets the next use
+  connect again.
 - Browser client option `requestOptions(action)` supplies default request options
   per action. Explicit request options override the defaults field by field; it
   is not used for authentication or logout.

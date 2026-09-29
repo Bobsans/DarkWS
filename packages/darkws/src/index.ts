@@ -2,6 +2,7 @@ export { default, default as DarkWs } from "./dark-ws.js";
 export {
   ConnectionClosedError,
   ErrorResponse,
+  LazyDarkWs,
   RequestTimeoutError,
 } from "./dark-ws.js";
 export type {
