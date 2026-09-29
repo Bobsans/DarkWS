@@ -620,6 +620,8 @@ describe("DarkWs", () => {
     const client = createClient({ authenticationToken: () => "expired" }).connect();
     const socket = MockWebSocket.instances[0];
     const opened = vi.fn();
+    const restoreFailed = vi.fn();
+    client.on("sessionRestoreFailed", restoreFailed);
     client.on("open", opened);
     const queued = expect(client.request("queued")).rejects.toMatchObject({ message: "auth:failed" });
     socket.open();
@@ -627,7 +629,12 @@ describe("DarkWs", () => {
     expect(opened).not.toHaveBeenCalled();
     socket.serverText("auth:failed");
     await queued;
+    expect(restoreFailed).toHaveBeenCalledTimes(1);
     expect(opened).toHaveBeenCalledTimes(1);
+    expect(restoreFailed.mock.calls[0][0]).toBeInstanceOf(ErrorResponse);
+    expect(restoreFailed.mock.calls[0][0].message).toBe("auth:failed");
+    expect(client.isCurrentSocket(restoreFailed.mock.calls[0][1])).toBe(true);
+    expect(restoreFailed.mock.invocationCallOrder[0]).toBeLessThan(opened.mock.invocationCallOrder[0]);
     const anonymous = expect(client.request("public")).rejects.toBeInstanceOf(ConnectionClosedError);
     await vi.advanceTimersByTimeAsync(0);
     expect(JSON.parse(socket.sent[1] as string).action).toBe("public");
@@ -635,8 +642,42 @@ describe("DarkWs", () => {
     await anonymous;
   });
 
+  it("lets a restore-failure listener close the socket before anonymous readiness", async () => {
+    const failure = new Error("Token provider failed");
+    const client = createClient({ authenticationToken: () => { throw failure; } }).connect();
+    const opened = vi.fn();
+    const restoreFailed = vi.fn(() => client.close());
+    client.on("sessionRestoreFailed", restoreFailed);
+    client.on("open", opened);
+    const queued = expect(client.request("private")).rejects.toBe(failure);
+    MockWebSocket.instances[0].open();
+    await queued;
+    expect(restoreFailed).toHaveBeenCalledTimes(1);
+    expect(restoreFailed).toHaveBeenCalledWith(failure, expect.anything());
+    expect(opened).not.toHaveBeenCalled();
+    expect(MockWebSocket.instances[0].sent).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+    client.dispose();
+  });
+
+  it("does not report session restoration failure from a replaced socket", async () => {
+    let rejectToken!: (reason: Error) => void;
+    const client = createClient({ authenticationToken: () => new Promise((_, reject) => { rejectToken = reject; }) }).connect();
+    const restoreFailed = vi.fn();
+    client.on("sessionRestoreFailed", restoreFailed);
+    MockWebSocket.instances[0].open();
+    client.close();
+    client.connect();
+    rejectToken(new Error("Old provider failed"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(restoreFailed).not.toHaveBeenCalled();
+    client.dispose();
+  });
+
   it.each([undefined, null, ""])("connects without authentication when the provider returns %j", async token => {
     const client = createClient({ authenticationToken: () => token }).connect();
+    const restoreFailed = vi.fn();
+    client.on("sessionRestoreFailed", restoreFailed);
     const socket = MockWebSocket.instances[0];
     const request = client.request<number>("public");
     socket.open();
@@ -645,6 +686,7 @@ describe("DarkWs", () => {
     expect(sent.action).toBe("public");
     socket.serverMessage({ id: sent.id, data: 7 });
     await expect(request).resolves.toBe(7);
+    expect(restoreFailed).not.toHaveBeenCalled();
     client.dispose();
   });
 

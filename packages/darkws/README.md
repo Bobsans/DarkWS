@@ -166,21 +166,40 @@ sent as `auth:<token>`, and queued and new requests wait until `auth:success`
 before they are sent. The `open` event fires after that exchange. `auth:failed` or
 a provider error rejects the queued requests with that error, and the connection
 continues without a session. Returning no token connects anonymously.
+Before that anonymous-ready `open`, `sessionRestoreFailed(error, event)` reports
+the rejected token or provider error. It includes the native opening event for
+`isCurrentSocket(event)` and fires on the first connection as well as reconnects.
+It does not fire for manual authentication, success, no token, or an attempt whose
+socket has already closed or been replaced. Close in the listener if anonymous
+fallback is unsuitable; this prevents `open` and blocks later calls until `connect()`:
 
 ```ts
 const client = new DarkWs({
   secure: true,
   path: "/ws",
   authenticationToken: () => tokenStore.current(),
-}).connect();
+});
+client.on("sessionRestoreFailed", (error, event) => {
+  if (client.isCurrentSocket(event)) client.close();
+  console.error("Session was not restored", error);
+});
+client.connect();
 ```
+
+The .NET client instead treats automatic authentication rejection as a permanent
+readiness failure. See the [client lifecycle contract](https://github.com/Bobsans/DarkWS#client-lifecycle-contract)
+for the shared scenario and intentional differences. `open` and `connected` do not
+guarantee an authenticated browser session.
 
 Calling `authenticate(token)` from an `open` listener instead does not delay
 requests that were queued during reconnect: they can reach the server first.
 
 Waiting for a connection is event-driven and bounded by `waitConnectionTimeout`
 (30 seconds by default); with `reconnect: false` waiting requests fail as soon as
-the socket closes. `requestTimeout` starts after sending (5 minutes by
+the socket closes. This disables background reconnect only: a later request or send
+still opens a new socket. After an explicit `close()` on `DarkWs`, call `connect()`
+first; `LazyDarkWs.close()` deliberately reconnects on next use.
+`requestTimeout` starts after sending (5 minutes by
 default), so the total wait can be the sum of both. A response timeout of zero
 disables expiry; the request remains pending until a response, disconnect, or
 disposal. Ping starts only on a successful connection; constructing a client

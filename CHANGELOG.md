@@ -8,6 +8,11 @@ include migration guidance before a release is published.
 
 ### Added
 
+- DWA-06: Browser `sessionRestoreFailed(error, event)` reports rejected automatic
+  authentication or a token-provider error before anonymous-ready `open`. The event
+  identifies the socket and lets applications close it to stop that fallback.
+  Existing browser and .NET lifecycle policies remain unchanged; the protocol docs
+  compare them and a shared integration scenario exercises both clients.
 - Browser client `DarkWs.lazy(options | () => options)` returns a `LazyDarkWs`
   facade that creates its client on first use and connects it on the first
   request, command, or subscription. It keeps subscriptions across `reset()`,

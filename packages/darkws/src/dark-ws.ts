@@ -1,5 +1,7 @@
 export interface DarkWsEvents {
   open: [Event];
+  /** Automatic authentication failed on an open socket, before the anonymous-ready open event. */
+  sessionRestoreFailed: [Error, Event];
   close: [CloseEvent];
   error: [Event];
   message: [unknown, MessageEvent];
@@ -118,6 +120,7 @@ export default class DarkWs {
     [K in keyof DarkWsEvents]: ((...args: DarkWsEvents[K]) => void)[]
   } = {
     open: [],
+    sessionRestoreFailed: [],
     close: [],
     error: [],
     message: [],
@@ -458,7 +461,9 @@ export default class DarkWs {
       if (token) await this.systemRequest("auth", "auth:" + token, socket);
     } catch (error) {
       if (socket !== this.socket || socket.readyState !== WebSocket.OPEN) return;
-      this.rejectConnectionWaiters(error instanceof Error ? error : new Error(String(error)));
+      const failure = error instanceof Error ? error : new Error(String(error));
+      this.rejectConnectionWaiters(failure);
+      this.emit("sessionRestoreFailed", failure, event);
     }
     if (socket === this.socket && socket.readyState === WebSocket.OPEN) this.markReady(socket, event);
   }

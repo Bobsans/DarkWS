@@ -488,8 +488,33 @@ server before authentication; `open` fires after that exchange. `auth:failed` or
 a provider error rejects the queued requests and leaves the connection without a
 session; returning no token connects anonymously. Calling `authenticate()` from an
 `open` listener does not provide this ordering.
+`sessionRestoreFailed(error, event)` reports this failure before the anonymous-ready
+`open` event. A listener can call `close()` to prevent that fallback; `event` is the
+native opening event and works with `isCurrentSocket(event)`.
 
 ## Protocol
+
+### Client lifecycle contract
+
+The clients share the wire protocol but keep these distinct lifecycle policies:
+
+| Case | Browser `DarkWs` | .NET `DarkWsClient` |
+| --- | --- | --- |
+| Socket drops with reconnect disabled | Pending calls fail; no background retry. The next request or send opens a new socket. | Pending calls fail. Later calls fail until explicit `ConnectAsync`. |
+| Automatic authentication receives `auth:failed` | Queued calls reject with `ErrorResponse`. `sessionRestoreFailed` fires, then `open` signals readiness without a restored session; later calls can be sent anonymously. | Readiness fails with `DarkWsResponseException`. State becomes `Disconnected` with the failure reason and automatic retries stop. Correct the credentials and call `ConnectAsync`. |
+| Automatic token provider throws | Same failure event and fallback if the socket is still open. | Permanent readiness failure; correct the provider and call `ConnectAsync`. |
+| Automatic token provider returns no token | Connects anonymously without `sessionRestoreFailed`. | Permanent readiness failure. |
+
+`sessionRestoreFailed` also covers the first connection. It is not emitted for
+manual `authenticate()` rejection, successful restoration, an intentionally empty
+token, or a failed attempt whose socket has already closed or been replaced.
+It precedes `open`; closing or disposing in its listener prevents anonymous readiness.
+Browser `connected` reports transport state, and `open` alone does not prove that
+authentication succeeded. The .NET `Connected` state follows successful restoration.
+These policies also apply through `LazyDarkWs`; its explicit `close()` additionally
+allows the next use to reconnect, as documented for the facade.
+
+### Messages
 
 | Direction | Shape |
 | --- | --- |

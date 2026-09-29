@@ -20,7 +20,7 @@ namespace DarkWS.Client.Test;
 internal sealed class TestServer : IAsyncDisposable {
     private readonly WebApplication _app;
     private readonly CancellationTokenSource _stop = new();
-    private readonly ConcurrentBag<WebSocket> _sockets = [];
+    private readonly ConcurrentDictionary<WebSocket, TaskCompletionSource> _sockets = new();
     private readonly Channel<WebSocket> _accepted = Channel.CreateUnbounded<WebSocket>();
     internal Uri Endpoint { get; private set; } = null!;
     internal int Connections;
@@ -51,11 +51,14 @@ internal sealed class TestServer : IAsyncDisposable {
                 }
 
                 using var socket = await context.WebSockets.AcceptWebSocketAsync();
-                server._sockets.Add(socket);
+                var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                server._sockets[socket] = finished;
                 server._accepted.Writer.TryWrite(socket);
                 try {
-                    await Task.Delay(Timeout.Infinite, server._stop.Token);
-                } catch (OperationCanceledException) { }
+                    await finished.Task.WaitAsync(server._stop.Token);
+                } catch (OperationCanceledException) { } finally {
+                    server._sockets.TryRemove(socket, out _);
+                }
             });
         }
 
@@ -66,6 +69,9 @@ internal sealed class TestServer : IAsyncDisposable {
     }
 
     internal async Task<WebSocket> AcceptAsync() => await _accepted.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+    // Finish the upgrade request after the close handshake so browsers receive the transport EOF.
+    internal void FinishConnection(WebSocket socket) => _sockets[socket].TrySetResult();
 
     internal static async Task<string> ReadAsync(WebSocket socket) {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -95,7 +101,7 @@ internal sealed class TestServer : IAsyncDisposable {
         SendAsync(socket, "{\"id\":\"" + request.GetProperty("id").GetString() + "\"" + (fields.Length > 0 ? "," + fields : "") + "}");
 
     public async ValueTask DisposeAsync() {
-        foreach (var socket in _sockets) {
+        foreach (var socket in _sockets.Keys) {
             socket.Abort();
         }
 

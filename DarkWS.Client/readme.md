@@ -115,6 +115,12 @@ restore the old HTTP identity. Logout does not roll back running server actions.
 - Transport failures reconnect with exponential jitter up to 30 seconds, including a
   drop or timeout while automatic authentication waits for `auth:success`. Sent
   requests fail and are never replayed. New requests during recovery await readiness.
+- With `Reconnect = false`, a dropped socket stops recovery; later requests fail
+  until explicit `ConnectAsync`. Unlike the browser client, a new request does not
+  reopen it. Automatic authentication rejection also stops readiness instead of
+  falling back to anonymous use. `StateChanged` reports `Disconnected` with its
+  failure in `Reason`; `Error` reports it too. See the
+  [client lifecycle contract](https://github.com/Bobsans/DarkWS#client-lifecycle-contract).
 - Credentials rejected by the server (`auth:failed`), a failing or empty token
   provider, a failing socket configuration callback, HTTP 401/403, wire errors, and
   notification overflow stop automatic retry. Correct the cause and call `ConnectAsync`.
