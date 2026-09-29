@@ -66,6 +66,27 @@ a random delay from zero up to that many milliseconds before each retry. Counts
 must be non-negative safe integers; jitter must be finite and between `0` and
 `2147483647`. Invalid retry options reject with `RangeError` before connecting.
 
+Use `requestOptions` to give actions default request options, for example a
+shorter timeout and retries for every read:
+
+```ts
+const READ = { timeout: 45000, retry: { connectionClosed: 3, timeout: 1, jitter: 2000 } };
+
+const client = new DarkWs({
+  secure: true,
+  path: "/ws",
+  requestOptions: action => readActions.has(action) ? READ : undefined,
+});
+```
+
+It is called with the action name before each request. Explicit request options
+override the returned defaults field by field: `timeout`, `retry.connectionClosed`,
+`retry.timeout`, and `retry.jitter` are each taken from the explicit options when
+set, otherwise from the defaults. A numeric third argument overrides only `timeout`.
+Validation applies to the merged result, and an exception thrown by the provider
+rejects the request before anything is sent. `authenticate()` and `logout()` do
+not consult it.
+
 Enable retries **only for idempotent actions**, typically reads. Each attempt has
 a new request id; a late reply to an earlier attempt is ignored. A timeout or
 disconnect can occur after the server executed the action, so retrying a mutation

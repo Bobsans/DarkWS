@@ -1126,6 +1126,80 @@ describe("DarkWs", () => {
     });
   });
 
+  describe("per-action request options", () => {
+    it("applies the defaults returned for each action", async () => {
+      const requestOptions = vi.fn((action: string) => action === "read" ? { timeout: 10, retry: { timeout: 1 } } : undefined);
+      const client = createClient({ requestOptions }).connect();
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      const read = expect(client.request("read")).rejects.toBeInstanceOf(RequestTimeoutError);
+      const write = client.request("write");
+      await vi.advanceTimersByTimeAsync(21);
+      await read;
+      expect(requestOptions.mock.calls).toEqual([["read"], ["write"]]);
+      expect(socket.sent.map(value => JSON.parse(value as string).action)).toEqual(["read", "write", "read"]);
+      expect(client.pendingRequestCount).toBe(1);
+      socket.serverMessage({ id: JSON.parse(socket.sent[1] as string).id, data: 1 });
+      await expect(write).resolves.toBe(1);
+      client.dispose();
+    });
+
+    it("lets explicit options override the defaults field by field", async () => {
+      const client = createClient({
+        reconnect: false,
+        requestOptions: () => ({ timeout: 1000, retry: { timeout: 1, connectionClosed: 1 } }),
+      }).connect();
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      const rejected = expect(client.request("read", undefined, { timeout: 10, retry: { connectionClosed: 0 } }))
+        .rejects.toMatchObject({ name: "ConnectionClosedError", sent: true });
+      await vi.advanceTimersByTimeAsync(11);
+      expect(socket.sent).toHaveLength(2);
+      socket.serverClose();
+      await rejected;
+      expect(MockWebSocket.instances).toHaveLength(1);
+      client.dispose();
+    });
+
+    it("keeps the default retries with a numeric timeout", async () => {
+      const client = createClient({ requestOptions: () => ({ timeout: 1000, retry: { timeout: 1 } }) }).connect();
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      const rejected = expect(client.request("read", undefined, 10)).rejects.toBeInstanceOf(RequestTimeoutError);
+      await vi.advanceTimersByTimeAsync(21);
+      await rejected;
+      expect(socket.sent).toHaveLength(2);
+      client.dispose();
+    });
+
+    it("rejects a failing provider or invalid defaults before connecting", async () => {
+      const failing = createClient({ requestOptions: () => { throw new Error("options failed"); } });
+      await expect(failing.request("read")).rejects.toThrow("options failed");
+      const invalid = createClient({ requestOptions: () => ({ retry: { jitter: -1 } }) });
+      await expect(invalid.request("read")).rejects.toBeInstanceOf(RangeError);
+      expect(MockWebSocket.instances).toHaveLength(0);
+      failing.dispose();
+      invalid.dispose();
+    });
+
+    it("does not consult the provider for authentication commands", async () => {
+      const requestOptions = vi.fn(() => undefined);
+      const client = createClient({ requestOptions }).connect();
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      const authenticated = client.authenticate("token");
+      await vi.advanceTimersByTimeAsync(0);
+      socket.serverText("auth:success");
+      await authenticated;
+      const loggedOut = client.logout();
+      await vi.advanceTimersByTimeAsync(0);
+      socket.serverText("logout:success");
+      await loggedOut;
+      expect(requestOptions).not.toHaveBeenCalled();
+      client.dispose();
+    });
+  });
+
   it("sends raw strings without JSON encoding", async () => {
     const client = createClient().connect();
     const socket = MockWebSocket.instances[0];

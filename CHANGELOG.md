@@ -8,6 +8,9 @@ include migration guidance before a release is published.
 
 ### Added
 
+- Browser client option `requestOptions(action)` supplies default request options
+  per action. Explicit request options override the defaults field by field; it
+  is not used for authentication or logout.
 - Browser client `onAction<TData>(action, callback)` filters one exact broadcast
   action, passes its data directly, and returns an idempotent unsubscribe function.
   It reuses the existing message subscriptions and survives reconnects.

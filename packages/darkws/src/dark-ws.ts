@@ -15,6 +15,8 @@ export interface DarkWsOptions {
   beforeConnect?: () => Promise<unknown>;
   authenticationToken?: () => string | null | undefined | Promise<string | null | undefined>;
   requestTimeout?: number;
+  /** Default options per action; explicit request options override them field by field. Not used by authenticate/logout. */
+  requestOptions?: (action: string) => DarkWsRequestOptions | undefined;
   /** Reply timeout for authentication and logout, including session restore. Default 30000 ms; 0 disables it. */
   controlTimeout?: number;
   reconnect?: boolean;
@@ -260,10 +262,11 @@ export default class DarkWs {
   }
 
   private async requestWithRetry<TResult, TPayload>(action: string, payload: TPayload | undefined, options: DarkWsRequestOptions): Promise<TResult> {
-    let connectionRetries = options.retry?.connectionClosed ?? 0;
-    let timeoutRetries = options.retry?.timeout ?? 0;
-    const jitter = options.retry?.jitter ?? 0;
-    const timeout = options.timeout;
+    const defaults = this.options.requestOptions?.(action) ?? {};
+    let connectionRetries = options.retry?.connectionClosed ?? defaults.retry?.connectionClosed ?? 0;
+    let timeoutRetries = options.retry?.timeout ?? defaults.retry?.timeout ?? 0;
+    const jitter = options.retry?.jitter ?? defaults.retry?.jitter ?? 0;
+    const timeout = options.timeout ?? defaults.timeout;
     if (!Number.isSafeInteger(connectionRetries) || connectionRetries < 0 ||
         !Number.isSafeInteger(timeoutRetries) || timeoutRetries < 0 ||
         !Number.isFinite(jitter) || jitter < 0 || jitter > 2147483647) {
