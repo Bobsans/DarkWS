@@ -35,7 +35,10 @@ internal sealed class RedisDarkWsBackplane(
         cancellationToken.ThrowIfCancellationRequested();
         await _subscriptionLock.WaitAsync(cancellationToken);
         try {
-            if (_subscription is not null) throw new InvalidOperationException("The Redis backplane already has a subscriber; unsubscribe before subscribing again");
+            if (_subscription is not null) {
+                throw new InvalidOperationException("The Redis backplane already has a subscriber; unsubscribe before subscribing again");
+            }
+
             var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             try {
                 var subscription = await connection.GetSubscriber().SubscribeAsync(_channel);
@@ -56,7 +59,10 @@ internal sealed class RedisDarkWsBackplane(
         cancellationToken.ThrowIfCancellationRequested();
         await _subscriptionLock.WaitAsync(cancellationToken);
         try {
-            if (_subscription is null) return;
+            if (_subscription is null) {
+                return;
+            }
+
             await _subscriptionCancellation!.CancelAsync();
             await _subscription.UnsubscribeAsync();
             _subscription = null;

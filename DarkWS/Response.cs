@@ -14,6 +14,7 @@ public sealed class ResponseContext(
 ) {
     private readonly IWebSocketConnection _connection = connection ?? throw new ArgumentNullException(nameof(connection));
     private readonly DarkWsOptions _options = options ?? throw new ArgumentNullException(nameof(options));
+
     /// <summary>Gets the id used to correlate the response with its request.</summary>
     public string RequestId { get; } = requestId ?? throw new ArgumentNullException(nameof(requestId));
 
@@ -57,6 +58,7 @@ public sealed class SuccessResponse : IResponse {
 /// <param name="error">Stable error code.</param>
 public class ErrorResponse(string error) : IResponse {
     private readonly string _error = ValidateError(error);
+
     /// <summary>Writes this result using the supplied correlation context and cancellation token.</summary>
     public Task WriteResultAsync(ResponseContext context, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(context);
@@ -74,6 +76,7 @@ public class ErrorResponse(string error) : IResponse {
 /// <param name="details">Typed details sent to the client.</param>
 public sealed class ErrorResponse<T>(string error, T details) : IResponse {
     private readonly string _error = ErrorResponse.ValidateError(error);
+
     /// <summary>Writes this result using the supplied correlation context and cancellation token.</summary>
     public Task WriteResultAsync(ResponseContext context, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(context);

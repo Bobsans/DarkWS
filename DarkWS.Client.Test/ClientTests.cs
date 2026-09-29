@@ -12,12 +12,14 @@ namespace DarkWS.Client.Test;
 [TestFixture]
 public sealed class ClientTests {
     private static TaskCompletionSource<T> Completion<T>() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private static SemaphoreSlim SendGate(DarkWsClient client) {
         const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Instance;
         var cycle = typeof(DarkWsClient).GetField("_cycle", flags)!.GetValue(client)!;
         var connection = cycle.GetType().GetField("Connection", flags)!.GetValue(cycle)!;
         return (SemaphoreSlim)connection.GetType().GetField("SendGate", flags)!.GetValue(connection)!;
     }
+
     private static DarkWsClient Client(TestServer server, Action<DarkWsClientOptions>? configure = null) {
         var options = new DarkWsClientOptions { Endpoint = server.Endpoint, Reconnect = false, CloseTimeout = TimeSpan.FromMilliseconds(100) };
         configure?.Invoke(options);
@@ -32,7 +34,7 @@ public sealed class ClientTests {
         Assert.That(await client.RequestAsync<int>("echo:value", 42), Is.EqualTo(42));
         await client.RequestAsync("echo:empty");
         await client.RequestAsync("echo:value", new { value = 1 });
-        Assert.That(await client.RequestAsync<string?>("echo:value", (object?)null), Is.Null);
+        Assert.That(await client.RequestAsync<string?>("echo:value", null), Is.Null);
         var error = Assert.ThrowsAsync<DarkWsResponseException>(() => client.RequestAsync("echo:error"))!;
         Assert.Multiple(() => {
             Assert.That(error.Code, Is.EqualTo("test:rejected"));
@@ -70,9 +72,14 @@ public sealed class ClientTests {
         var tasks = Enumerable.Range(0, 20).Select(i => client.RequestAsync<int>("echo", i)).ToArray();
         var socket = await server.AcceptAsync();
         var requests = new List<JsonElement>();
-        for (var i = 0; i < tasks.Length; i++) requests.Add(await TestServer.RequestAsync(socket));
-        foreach (var request in requests.AsEnumerable().Reverse())
+        for (var i = 0; i < tasks.Length; i++) {
+            requests.Add(await TestServer.RequestAsync(socket));
+        }
+
+        foreach (var request in requests.AsEnumerable().Reverse()) {
             await TestServer.ReplyAsync(socket, request, "\"data\":" + request.GetProperty("data").GetInt32());
+        }
+
         Assert.That(await Task.WhenAll(tasks), Is.EqualTo(Enumerable.Range(0, 20)));
         Assert.That(server.Connections, Is.EqualTo(1));
         var empty = client.RequestAsync("empty");
@@ -116,10 +123,15 @@ public sealed class ClientTests {
         foreach (var fields in new[] { "", "\"data\":\"wrong\"", "\"error\":\"\",\"data\":7" }) {
             var request = client.RequestAsync<int>("test");
             await TestServer.ReplyAsync(socket, await TestServer.RequestAsync(socket), fields);
-            if (fields.Length == 0) Assert.ThrowsAsync<DarkWsProtocolException>(async () => await request);
-            else if (fields.StartsWith("\"data", StringComparison.Ordinal)) Assert.ThrowsAsync<JsonException>(async () => await request);
-            else Assert.That(Assert.ThrowsAsync<DarkWsResponseException>(async () => await request)!.Code, Is.Empty);
+            if (fields.Length == 0) {
+                Assert.ThrowsAsync<DarkWsProtocolException>(async () => await request);
+            } else if (fields.StartsWith("\"data", StringComparison.Ordinal)) {
+                Assert.ThrowsAsync<JsonException>(async () => await request);
+            } else {
+                Assert.That(Assert.ThrowsAsync<DarkWsResponseException>(async () => await request)!.Code, Is.Empty);
+            }
         }
+
         var good = client.RequestAsync<JsonElement>("good");
         await TestServer.ReplyAsync(socket, await TestServer.RequestAsync(socket), "\"data\":{\"value\":42}");
         Assert.That((await good).GetProperty("value").GetInt32(), Is.EqualTo(42));
@@ -128,7 +140,10 @@ public sealed class ClientTests {
     [Test]
     public async Task CancellationAndCapacityAreLocalToTheCaller() {
         await using var server = await TestServer.StartAsync();
-        await using var client = Client(server, options => { options.MaxPendingRequests = 1; options.RequestTimeout = Timeout.InfiniteTimeSpan; });
+        await using var client = Client(server, options => {
+            options.MaxPendingRequests = 1;
+            options.RequestTimeout = Timeout.InfiniteTimeSpan;
+        });
         using var cancellation = new CancellationTokenSource();
         var request = client.RequestAsync<int>("slow", cancellation.Token);
         var socket = await server.AcceptAsync();
@@ -163,7 +178,15 @@ public sealed class ClientTests {
         await using var client = Client(server, options => options.Reconnect = true);
         var reconnected = Completion<bool>();
         var states = new List<DarkWsClientState>();
-        client.StateChanged += (_, change) => { lock (states) states.Add(change.State); if (change.State == DarkWsClientState.Reconnecting) reconnected.TrySetResult(true); };
+        client.StateChanged += (_, change) => {
+            lock (states) {
+                states.Add(change.State);
+            }
+
+            if (change.State == DarkWsClientState.Reconnecting) {
+                reconnected.TrySetResult(true);
+            }
+        };
         var notification = Completion<bool>();
         using var subscription = client.On("changed", () => notification.TrySetResult(true));
         var old = client.RequestAsync("old");
@@ -181,7 +204,9 @@ public sealed class ClientTests {
         await TestServer.SendAsync(second, "{\"id\":\"@\",\"action\":\"changed\"}");
         await notification.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await client.CloseAsync();
-        lock (states) Assert.That(states, Does.Contain(DarkWsClientState.Reconnecting));
+        lock (states) {
+            Assert.That(states, Does.Contain(DarkWsClientState.Reconnecting));
+        }
     }
 
     [Test]
@@ -205,12 +230,18 @@ public sealed class ClientTests {
     [Test]
     public async Task NotificationOverflowStopsReconnectAndDisposeDoesNotWaitForHandler() {
         await using var server = await TestServer.StartAsync();
-        await using var client = Client(server, options => { options.NotificationQueueCapacity = 1; options.Reconnect = true; });
+        await using var client = Client(server, options => {
+            options.NotificationQueueCapacity = 1;
+            options.Reconnect = true;
+        });
         var entered = Completion<bool>();
         var release = Completion<bool>();
         var error = Completion<Exception>();
         client.Error += (_, args) => error.TrySetResult(args.Exception);
-        using var subscription = client.OnAsync<int>("n", async (_, _) => { entered.TrySetResult(true); await release.Task; });
+        using var subscription = client.OnAsync<int>("n", async (_, _) => {
+            entered.TrySetResult(true);
+            await release.Task;
+        });
         await client.ConnectAsync();
         var socket = await server.AcceptAsync();
         const string broadcast = "{\"id\":\"@\",\"action\":\"n\",\"data\":1}";
@@ -266,8 +297,10 @@ public sealed class ClientTests {
         var socket = await server.AcceptAsync();
         var request = await TestServer.RequestAsync(socket);
         var text = "{\"id\":\"" + request.GetProperty("id").GetString() + "\",\"data\":\"Привет\"}";
-        foreach (var value in Encoding.UTF8.GetBytes(text).SkipLast(1))
+        foreach (var value in Encoding.UTF8.GetBytes(text).SkipLast(1)) {
             await socket.SendAsync(new byte[] { value }, WebSocketMessageType.Text, false, CancellationToken.None);
+        }
+
         await socket.SendAsync("}"u8.ToArray(), WebSocketMessageType.Text, true, CancellationToken.None);
         Assert.That(await response, Is.EqualTo("Привет"));
     }
@@ -275,7 +308,10 @@ public sealed class ClientTests {
     [Test]
     public async Task HeartbeatWaitsForPongAndDetectsUnresponsivePeer() {
         await using var server = await TestServer.StartAsync();
-        await using var client = Client(server, options => { options.PingInterval = TimeSpan.FromMilliseconds(40); options.PongTimeout = TimeSpan.FromMilliseconds(80); });
+        await using var client = Client(server, options => {
+            options.PingInterval = TimeSpan.FromMilliseconds(40);
+            options.PongTimeout = TimeSpan.FromMilliseconds(80);
+        });
         var error = Completion<Exception>();
         client.Error += (_, args) => error.TrySetResult(args.Exception);
         await client.ConnectAsync();
@@ -300,7 +336,10 @@ public sealed class ClientTests {
     public async Task ProviderAuthenticatesReconnectAndLogoutSuppressesIt() {
         await using var server = await TestServer.StartAsync(darkWs: true);
         var calls = 0;
-        await using var client = Client(server, options => options.AuthenticationTokenProvider = _ => { Interlocked.Increment(ref calls); return ValueTask.FromResult<string?>("valid"); });
+        await using var client = Client(server, options => options.AuthenticationTokenProvider = _ => {
+            Interlocked.Increment(ref calls);
+            return ValueTask.FromResult<string?>("valid");
+        });
         Assert.That(await client.RequestAsync<int>("private:value"), Is.EqualTo(123));
         await client.CloseAsync();
         await client.ConnectAsync();
@@ -368,6 +407,7 @@ public sealed class ClientTests {
         } else {
             Assert.That(Assert.ThrowsAsync<DarkWsTimeoutException>(async () => await auth)!.Stage, Is.EqualTo(DarkWsTimeoutStage.Response));
         }
+
         await client.CloseAsync();
         await client.ConnectAsync();
         var next = await server.AcceptAsync();
@@ -382,7 +422,10 @@ public sealed class ClientTests {
     [TestCase("wrong")]
     public async Task InvalidProviderCredentialsFailReadiness(string? token) {
         await using var server = await TestServer.StartAsync(darkWs: true);
-        await using var client = Client(server, options => { options.Reconnect = true; options.AuthenticationTokenProvider = _ => ValueTask.FromResult(token); });
+        await using var client = Client(server, options => {
+            options.Reconnect = true;
+            options.AuthenticationTokenProvider = _ => ValueTask.FromResult(token);
+        });
         Assert.That(async () => await client.ConnectAsync(), Throws.Exception);
         Assert.That(client.State, Is.EqualTo(DarkWsClientState.Disconnected));
     }
@@ -414,7 +457,10 @@ public sealed class ClientTests {
             options.RequestTimeout = Timeout.InfiniteTimeSpan;
             // The first call ends only when the dropped socket cancels it.
             options.AuthenticationTokenProvider = async token => {
-                if (Interlocked.Increment(ref calls) == 1) await Task.Delay(Timeout.Infinite, token);
+                if (Interlocked.Increment(ref calls) == 1) {
+                    await Task.Delay(Timeout.Infinite, token);
+                }
+
                 return "valid";
             };
         });
@@ -434,6 +480,7 @@ public sealed class ClientTests {
             var failure = (DarkWsConnectionException)await failures.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
             Assert.That(failure.CloseStatus, Is.EqualTo(WebSocketCloseStatus.EndpointUnavailable));
         }
+
         Assert.That(client.State, Is.EqualTo(DarkWsClientState.Connected));
         Assert.That(calls, Is.EqualTo(3));
         Assert.That(server.Connections, Is.EqualTo(3));
@@ -469,6 +516,7 @@ public sealed class ClientTests {
         } else {
             Assert.That(Assert.ThrowsAsync<DarkWsTimeoutException>(async () => await auth)!.Stage, Is.EqualTo(DarkWsTimeoutStage.Send));
         }
+
         gate.Release();
         var next = client.RequestAsync<int>("next");
         var request = await TestServer.RequestAsync(socket);
@@ -526,18 +574,22 @@ public sealed class ClientTests {
     [Test]
     public void InvalidSettingsAndArgumentsFailEarly() {
         Assert.Throws<ArgumentNullException>(() => new DarkWsClient((DarkWsClientOptions)null!));
-        foreach (var uri in new Uri?[] { null, new("relative", UriKind.Relative), new("https://host"), new("ws://user:password@host"), new("ws://host/#fragment") })
+        foreach (var uri in new Uri?[] { null, new("relative", UriKind.Relative), new("https://host"), new("ws://user:password@host"), new("ws://host/#fragment") }) {
             Assert.Throws<ArgumentException>(() => new DarkWsClient(new DarkWsClientOptions { Endpoint = uri! }));
+        }
+
         foreach (var property in typeof(DarkWsClientOptions).GetProperties().Where(property => property.PropertyType == typeof(TimeSpan))) {
             var options = new DarkWsClientOptions { Endpoint = new Uri("ws://host") };
             property.SetValue(options, TimeSpan.Zero);
             Assert.Throws<ArgumentOutOfRangeException>(() => new DarkWsClient(options));
         }
+
         foreach (var property in typeof(DarkWsClientOptions).GetProperties().Where(property => property.PropertyType == typeof(int))) {
             var options = new DarkWsClientOptions { Endpoint = new Uri("ws://host") };
             property.SetValue(options, 0);
             Assert.Throws<ArgumentOutOfRangeException>(() => new DarkWsClient(options));
         }
+
         Assert.Throws<ArgumentNullException>(() => new DarkWsClient(new DarkWsClientOptions { Endpoint = new Uri("ws://host"), JsonOptions = null! }));
         using var client = new DarkWsClient(new Uri("ws://host"));
         Assert.Throws<ArgumentException>(() => client.On(" ", () => { }));
@@ -582,7 +634,11 @@ public sealed class ClientTests {
         Assert.That(called, Is.Zero);
         var observed = Completion<bool>();
         client.StateChanged += (_, _) => throw new InvalidOperationException("state observer");
-        client.Error += (_, args) => { if (args.Exception.Message == "state observer") observed.TrySetResult(true); };
+        client.Error += (_, args) => {
+            if (args.Exception.Message == "state observer") {
+                observed.TrySetResult(true);
+            }
+        };
         await client.CloseAsync();
         await observed.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
@@ -591,7 +647,7 @@ public sealed class ClientTests {
     public async Task SubscriberConversionFailuresDoNotDiscardHealthyListeners() {
         await using var server = await TestServer.StartAsync();
         await using var client = Client(server);
-        var errors = System.Threading.Channels.Channel.CreateUnbounded<Exception>();
+        var errors = Channel.CreateUnbounded<Exception>();
         var delivered = Completion<bool>();
         client.Error += (_, args) => errors.Writer.TryWrite(args.Exception);
         using var invalid = client.On<int>("n", _ => { });
@@ -634,9 +690,7 @@ public sealed class ClientTests {
         });
         var failure = Assert.ThrowsAsync<DarkWsConnectionException>(() => configured.ConnectAsync())!;
         Assert.That(failure.ToString(), Does.Not.Contain("secret token"));
-        await using var provider = Client(server, options => {
-            options.AuthenticationTokenProvider = _ => throw new InvalidOperationException("secret token");
-        });
+        await using var provider = Client(server, options => { options.AuthenticationTokenProvider = _ => throw new InvalidOperationException("secret token"); });
         failure = Assert.ThrowsAsync<DarkWsConnectionException>(() => provider.ConnectAsync())!;
         Assert.That(failure.ToString(), Does.Not.Contain("secret token"));
     }

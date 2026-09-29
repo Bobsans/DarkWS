@@ -1,7 +1,7 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Net.WebSockets;
 using System.Security.Claims;
 using System.Text;
-using System.Diagnostics.CodeAnalysis;
-using DarkWS.Abstractions;
 using DarkWS.Test.Project;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
@@ -82,12 +82,12 @@ public sealed class CoverageTests {
     [Test]
     public async Task ClosingAlreadyClosedConnectionDoesNotCloseAgainAsync() {
         var socket = new TestWebSocket();
-        socket.SetState(System.Net.WebSockets.WebSocketState.Closed);
+        socket.SetState(WebSocketState.Closed);
         using var connection = CreateConnection(socket);
 
         await connection.CloseAsync();
 
-        Assert.That(socket.State, Is.EqualTo(System.Net.WebSockets.WebSocketState.Closed));
+        Assert.That(socket.State, Is.EqualTo(WebSocketState.Closed));
     }
 
     private static WebSocketConnection CreateConnection(TestWebSocket socket) {
@@ -115,6 +115,7 @@ public sealed class CoverageTests {
         public Task LoadAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public void Remove(string key) => _values.Remove(key);
         public void Set(string key, byte[] value) => _values[key] = value;
+
         public bool TryGetValue(string key, [NotNullWhen(true)] out byte[]? value) {
             return _values.TryGetValue(key, out value);
         }

@@ -4,6 +4,7 @@ namespace DarkWS;
 public static class DarkWsProtocol {
     /// <summary>Identifies an unsolicited broadcast; clients must not use it as a request id.</summary>
     public const string BroadcastId = "@";
+
     /// <summary>Reserved legacy acknowledgement id. Current system replies are plain text and do not emit this id.</summary>
     public const string LegacyAuthenticationId = "@auth";
 

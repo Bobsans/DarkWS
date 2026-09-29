@@ -7,18 +7,23 @@ namespace DarkWS;
 public abstract class HandlerBase {
     private WebSocketHandler Owner { get; set; } = null!;
     private IDarkWsContextAccessor Context { get; set; } = null!;
+
     /// <summary>Gets the current message scope's service provider.</summary>
     protected IServiceProvider Services { get; private set; } = null!;
 
     /// <summary>Gets the required handler session. Throws InvalidOperationException for an anonymous connection or incompatible typed session.</summary>
     protected IDarkWsSession Session => Context.Session
         ?? throw new InvalidOperationException("This handler requires an authenticated session");
+
     /// <summary>Gets the HTTP upgrade context shared by the connection. Not thread-safe: concurrent actions of the connection share it.</summary>
     protected HttpContext HttpContext => Context.HttpContext;
+
     /// <summary>Gets ASP.NET session state when its middleware is installed, otherwise null. Not thread-safe: concurrent actions of the connection share it.</summary>
     protected ISession? AspNetSession => Context.AspNetSession;
+
     /// <summary>Gets the current connection during initialized message handling.</summary>
     protected IWebSocketConnection Connection => Context.Connection;
+
     /// <summary>Gets the token signaled when the connection stops. Handlers should observe it during asynchronous work.</summary>
     protected CancellationToken ConnectionAborted => Context.ConnectionAborted;
 
@@ -30,10 +35,13 @@ public abstract class HandlerBase {
 
     /// <summary>Creates a successful action result with optional typed data.</summary>
     protected static IResponse Ok() => new SuccessResponse();
+
     /// <summary>Creates a successful action result with optional typed data.</summary>
     protected static IResponse Ok<T>(T data) => new SuccessResponse<T>(data);
+
     /// <summary>Creates an error action result with a stable code and optional details.</summary>
     protected static IResponse Error(string error) => new ErrorResponse(error);
+
     /// <summary>Creates an error action result with a stable code and optional details.</summary>
     protected static IResponse Error<T>(string error, T details) => new ErrorResponse<T>(error, details);
 

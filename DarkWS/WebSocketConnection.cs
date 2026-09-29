@@ -19,6 +19,7 @@ public sealed class WebSocketConnection(
     private readonly int _maxMessageSizeBytes = maxMessageSizeBytes > 0
         ? maxMessageSizeBytes
         : throw new ArgumentOutOfRangeException(nameof(maxMessageSizeBytes));
+
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly object _lifecycle = new();
     private readonly CancellationTokenSource _stopping = new();
@@ -32,14 +33,19 @@ public sealed class WebSocketConnection(
 
     /// <summary>Gets the stable identity for connection or session targeting.</summary>
     public string Id { get; } = Guid.NewGuid().ToString("N");
+
     /// <summary>Gets the HTTP upgrade context shared by the connection.</summary>
     public HttpContext HttpContext { get; } = context ?? throw new ArgumentNullException(nameof(context));
+
     /// <summary>Gets the owned transport. Use connection methods to preserve write serialization and disposal coordination.</summary>
     public WebSocket WebSocket { get; } = webSocket ?? throw new ArgumentNullException(nameof(webSocket));
+
     /// <summary>Gets the current session, or null for anonymous access.</summary>
     public IDarkWsSession? Session { get; private set; } = session;
+
     /// <summary>Reports whether the transport is open and has not begun closing.</summary>
     public bool IsOpen => !Volatile.Read(ref _closing) && WebSocket.State == WebSocketState.Open;
+
     internal TimeSpan ReceiveIdleTimeout { get; init; } = Timeout.InfiniteTimeSpan;
     internal TimeSpan SendTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
@@ -49,7 +55,10 @@ public sealed class WebSocketConnection(
 
     /// <summary>Receives a complete message. Close frames discard partial data; exceeding the size limit closes with status 1009.</summary>
     public async Task<ReceivedMessage> ReceiveMessageAsync(CancellationToken cancellationToken = default) {
-        if (!TryBeginOperation()) return new ReceivedMessage(new WebSocketReceiveResult(0, WebSocketMessageType.Close, true, WebSocketCloseStatus.NormalClosure, null), []);
+        if (!TryBeginOperation()) {
+            return new ReceivedMessage(new WebSocketReceiveResult(0, WebSocketMessageType.Close, true, WebSocketCloseStatus.NormalClosure, null), []);
+        }
+
         using var stream = new MemoryStream();
         var buffer = ArrayPool<byte>.Shared.Rent(4096);
         WebSocketReceiveResult result;
@@ -65,6 +74,7 @@ public sealed class WebSocketConnection(
                 if (result.MessageType == WebSocketMessageType.Close) {
                     return new ReceivedMessage(result, Array.Empty<byte>());
                 }
+
                 if (stream.Length + result.Count > _maxMessageSizeBytes) {
                     const string reason = "Message size limit exceeded";
                     using var closeTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -80,10 +90,12 @@ public sealed class WebSocketConnection(
                         WebSocket.Abort();
                         throw new TimeoutException("WebSocket close output timed out", error);
                     }
+
                     return new ReceivedMessage(new WebSocketReceiveResult(
                         0, WebSocketMessageType.Close, true, WebSocketCloseStatus.MessageTooBig, reason
                     ), Array.Empty<byte>());
                 }
+
                 await stream.WriteAsync(buffer.AsMemory(0, result.Count), cancellationToken);
             } while (!result.EndOfMessage);
         } catch (OperationCanceledException error) when (idle?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested) {
@@ -100,14 +112,19 @@ public sealed class WebSocketConnection(
     /// <summary>Sends immutable bytes with serialized writes. The built-in transport bounds lock wait and send time and aborts on timeout; closing connections ignore new writes.</summary>
     public async Task SendAsync(byte[] data, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(data);
-        if (!TryBeginOperation()) return;
+        if (!TryBeginOperation()) {
+            return;
+        }
+
         try {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopping.Token);
             timeout.CancelAfter(SendTimeout);
             try {
                 await _sendLock.WaitAsync(timeout.Token);
                 try {
-                    if (IsOpen) await WebSocket.SendAsync(data, WebSocketMessageType.Text, true, timeout.Token);
+                    if (IsOpen) {
+                        await WebSocket.SendAsync(data, WebSocketMessageType.Text, true, timeout.Token);
+                    }
                 } finally {
                     _sendLock.Release();
                 }
@@ -125,7 +142,10 @@ public sealed class WebSocketConnection(
     /// <summary>Stops new writes and performs graceful close. Supply cancellation to bound the close handshake.</summary>
     public async Task CloseAsync(CancellationToken cancellationToken = default) {
         BeginClosing();
-        if (!TryBeginOperation(allowClosing: true)) return;
+        if (!TryBeginOperation(allowClosing: true)) {
+            return;
+        }
+
         try {
             await _sendLock.WaitAsync(cancellationToken);
             try {
@@ -142,9 +162,13 @@ public sealed class WebSocketConnection(
 
     internal void BeginClosing() {
         lock (_lifecycle) {
-            if (_closing) return;
+            if (_closing) {
+                return;
+            }
+
             _closing = true;
         }
+
         // Cancellation callbacks and inline continuations run outside the lock.
         try {
             _stopping.Cancel();
@@ -157,16 +181,25 @@ public sealed class WebSocketConnection(
     public void Dispose() {
         BeginClosing();
         lock (_lifecycle) {
-            if (_disposed) return;
+            if (_disposed) {
+                return;
+            }
+
             _disposed = true;
-            if (_operations == 0) DisposeResources();
-            else WebSocket.Abort();
+            if (_operations == 0) {
+                DisposeResources();
+            } else {
+                WebSocket.Abort();
+            }
         }
     }
 
     private bool TryBeginOperation(bool allowClosing = false) {
         lock (_lifecycle) {
-            if (_disposed || _closing && !allowClosing) return false;
+            if (_disposed || _closing && !allowClosing) {
+                return false;
+            }
+
             _operations++;
             return true;
         }
@@ -174,7 +207,9 @@ public sealed class WebSocketConnection(
 
     private void EndOperation() {
         lock (_lifecycle) {
-            if (--_operations == 0 && _disposed) DisposeResources();
+            if (--_operations == 0 && _disposed) {
+                DisposeResources();
+            }
         }
     }
 

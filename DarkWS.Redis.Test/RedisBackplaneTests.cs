@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DarkWS.Abstractions;
-using DarkWS.Redis;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using StackExchange.Redis;
@@ -42,6 +41,7 @@ public sealed class RedisBackplaneTests {
             if (received.Count == 2) {
                 completed.TrySetResult();
             }
+
             return ValueTask.CompletedTask;
         }
 
@@ -114,7 +114,10 @@ public sealed class RedisBackplaneTests {
             Interlocked.Increment(ref count);
             return ValueTask.CompletedTask;
         });
-        await control.SubscribeAsync((_, _) => { delivered.TrySetResult(); return ValueTask.CompletedTask; });
+        await control.SubscribeAsync((_, _) => {
+            delivered.TrySetResult();
+            return ValueTask.CompletedTask;
+        });
         await backplane.UnsubscribeAsync();
 
         try {
@@ -178,7 +181,10 @@ public sealed class RedisBackplaneTests {
         var raw = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var wire = await _connection.GetSubscriber().SubscribeAsync(RedisChannel.Literal(channel));
         wire.OnMessage(message => raw.TrySetResult(message.Message.ToString()));
-        await second.SubscribeAsync((message, _) => { received.TrySetResult(message); return ValueTask.CompletedTask; });
+        await second.SubscribeAsync((message, _) => {
+            received.TrySetResult(message);
+            return ValueTask.CompletedTask;
+        });
         try {
             var data = JsonSerializer.SerializeToElement(new { DisplayName = "Ada" }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower });
             await first.PublishAsync(new DarkWsBroadcast(DarkWsTarget.Group, "group", "changed", data));
@@ -199,12 +205,19 @@ public sealed class RedisBackplaneTests {
         await using var provider = CreateProvider($"darkws-test:{Guid.NewGuid():N}");
         var backplane = provider.GetRequiredService<IDarkWsBackplane>();
         var oldCalls = 0;
-        await backplane.SubscribeAsync((_, _) => { Interlocked.Increment(ref oldCalls); return ValueTask.CompletedTask; });
+        await backplane.SubscribeAsync((_, _) => {
+            Interlocked.Increment(ref oldCalls);
+            return ValueTask.CompletedTask;
+        });
         Assert.ThrowsAsync<InvalidOperationException>(async () => await backplane.SubscribeAsync((_, _) => ValueTask.CompletedTask));
         await backplane.UnsubscribeAsync();
         var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var calls = 0;
-        await backplane.SubscribeAsync((_, _) => { Interlocked.Increment(ref calls); received.TrySetResult(); return ValueTask.CompletedTask; });
+        await backplane.SubscribeAsync((_, _) => {
+            Interlocked.Increment(ref calls);
+            received.TrySetResult();
+            return ValueTask.CompletedTask;
+        });
         try {
             await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "new", null));
             await received.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -225,15 +238,24 @@ public sealed class RedisBackplaneTests {
         var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await backplane.SubscribeAsync(async (_, token) => {
             started.TrySetResult();
-            try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
-            finally { if (token.IsCancellationRequested) stopped.TrySetResult(); }
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, token); } finally {
+                if (token.IsCancellationRequested) {
+                    stopped.TrySetResult();
+                }
+            }
         }, lifetime.Token);
         await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "blocked", null));
         await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        if (cancelCaller) lifetime.Cancel();
-        else await backplane.UnsubscribeAsync();
+        if (cancelCaller) {
+            lifetime.Cancel();
+        } else {
+            await backplane.UnsubscribeAsync();
+        }
+
         await stopped.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        if (cancelCaller) await backplane.UnsubscribeAsync();
+        if (cancelCaller) {
+            await backplane.UnsubscribeAsync();
+        }
     }
 
     private ServiceProvider CreateProvider(string channel, Action<DarkWsOptions>? configure = null) {

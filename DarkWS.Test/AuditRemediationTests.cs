@@ -1,6 +1,8 @@
-using System.Diagnostics;
+using System.Collections.Concurrent;
 using System.Net.WebSockets;
+using System.Reflection;
 using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DarkWS.Abstractions;
@@ -22,7 +24,7 @@ public sealed class AuditRemediationTests {
     [TestCase("@")]
     [TestCase("@auth")]
     public async Task ReservedIdsAreRejectedWithoutBroadcastingOrInvokingAnAction(string id) {
-        using var provider = CreateProvider();
+        await using var provider = CreateProvider();
         var socket = new TestWebSocket();
         var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(CreateConnection(provider, socket));
         socket.EnqueueReceive(JsonSerializer.Serialize(new { id, action = "audit:nullable" }));
@@ -46,7 +48,7 @@ public sealed class AuditRemediationTests {
         using var scope = provider.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<IDarkWsContextAccessor>();
         foreach (var property in typeof(IDarkWsContextAccessor).GetProperties()) {
-            var error = Assert.Throws<System.Reflection.TargetInvocationException>(() => property.GetValue(context));
+            var error = Assert.Throws<TargetInvocationException>(() => property.GetValue(context));
             Assert.That(error!.InnerException, Is.TypeOf<InvalidOperationException>());
             Assert.That(error.InnerException!.Message, Does.Contain("message scope"));
         }
@@ -87,7 +89,7 @@ public sealed class AuditRemediationTests {
     [TestCase("nullable-number", "", false)]
     [TestCase("input", ",\"data\":{\"text\":\"ok\"}", false)]
     public async Task PayloadContractDistinguishesInvalidAndNullableInput(string action, string payload, bool invalid) {
-        using var provider = CreateProvider();
+        await using var provider = CreateProvider();
         var socket = new TestWebSocket();
         var connection = CreateConnection(provider, socket);
         var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(connection);
@@ -95,7 +97,10 @@ public sealed class AuditRemediationTests {
         await UntilAsync(() => socket.Sent.Count == 1);
         using var response = JsonDocument.Parse(socket.Sent.Single());
         Assert.That(response.RootElement.TryGetProperty("error", out var error), Is.EqualTo(invalid));
-        if (invalid) Assert.That(error.GetString(), Is.EqualTo("darkws:error:invalid-request"));
+        if (invalid) {
+            Assert.That(error.GetString(), Is.EqualTo("darkws:error:invalid-request"));
+        }
+
         Assert.That(provider.GetRequiredService<Probe>().Calls, Is.EqualTo(invalid ? 0 : 1));
         socket.EnqueueClose();
         await accept.WaitAsync(TimeSpan.FromSeconds(2));
@@ -103,7 +108,7 @@ public sealed class AuditRemediationTests {
 
     [Test]
     public async Task HandlerJsonExceptionRemainsServerFailureAndSendFailureIsObserved() {
-        using var provider = CreateProvider();
+        await using var provider = CreateProvider();
         var socket = new TestWebSocket();
         var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(CreateConnection(provider, socket));
         socket.EnqueueReceive("{\"id\":\"server\",\"action\":\"audit:json-error\"}");
@@ -121,7 +126,7 @@ public sealed class AuditRemediationTests {
     [TestCase("throwing-response", "Cannot process or send response for broken")]
     [TestCase("null", "audit:null failed in")]
     public async Task ResultFailureAnswersWithRequestFailedAndKeepsTheConnection(string action, string log) {
-        using var provider = CreateProvider();
+        await using var provider = CreateProvider();
         var socket = new TestWebSocket();
         var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(CreateConnection(provider, socket));
         socket.EnqueueReceive($$"""{"id":"broken","action":"audit:{{action}}"}""");
@@ -136,7 +141,7 @@ public sealed class AuditRemediationTests {
 
     [Test]
     public async Task DeferredResultIsSerializedBeforeTheMessageScopeEnds() {
-        using var provider = CreateProvider();
+        await using var provider = CreateProvider();
         var socket = new TestWebSocket();
         var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(CreateConnection(provider, socket));
         socket.EnqueueReceive("{\"id\":\"deferred\",\"action\":\"audit:deferred\"}");
@@ -149,14 +154,14 @@ public sealed class AuditRemediationTests {
 
     [Test]
     public async Task FailureAfterAResponseWasSentIsOnlyLogged() {
-        using var provider = CreateProvider();
+        await using var provider = CreateProvider();
         var socket = new TestWebSocket();
         var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(CreateConnection(provider, socket));
         socket.EnqueueReceive("{\"id\":\"partial\",\"action\":\"audit:partial\"}");
         await UntilAsync(() => provider.GetRequiredService<Probe>().Logs.Any(log => log.Contains("Cannot process or send response for partial")));
         socket.EnqueueReceive("{\"id\":\"next\",\"action\":\"audit:nullable\"}");
         await UntilAsync(() => socket.Sent.Count == 2);
-        Assert.That(socket.Sent.Select(System.Text.Encoding.UTF8.GetString), Is.EqualTo(new[] { "{\"id\":\"partial\",\"data\":1}", "{\"id\":\"next\",\"data\":null}" }));
+        Assert.That(socket.Sent.Select(Encoding.UTF8.GetString), Is.EqualTo(new[] { "{\"id\":\"partial\",\"data\":1}", "{\"id\":\"next\",\"data\":null}" }));
         socket.EnqueueClose();
         await accept.WaitAsync(TimeSpan.FromSeconds(2));
     }
@@ -164,7 +169,7 @@ public sealed class AuditRemediationTests {
     [Test]
     public async Task CloseHooksObserveTheShutdownDeadline() {
         var hook = new CloseHook();
-        using var provider = CreateProvider(register: services => services.AddSingleton<DarkWsMiddleware>(hook));
+        await using var provider = CreateProvider(register: services => services.AddSingleton<DarkWsMiddleware>(hook));
         var socket = new TestWebSocket();
         socket.EnqueueClose();
         await provider.GetRequiredService<WebSocketHandler>().AcceptAsync(CreateConnection(provider, socket)).WaitAsync(TimeSpan.FromSeconds(2));
@@ -174,7 +179,7 @@ public sealed class AuditRemediationTests {
 
     [Test]
     public async Task RefreshAfterShutdownDoesNotResurrectTheConnection() {
-        using var provider = CreateProvider();
+        await using var provider = CreateProvider();
         var socket = new TestWebSocket();
         var connection = CreateConnection(provider, socket);
         var storage = provider.GetRequiredService<ConnectionStorage>();
@@ -186,7 +191,7 @@ public sealed class AuditRemediationTests {
 
     [Test]
     public async Task ShutdownIsBoundedAndDefersDisposalUntilUncooperativeHandlerCompletes() {
-        using var provider = CreateProvider();
+        await using var provider = CreateProvider();
         var socket = new TestWebSocket();
         var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(CreateConnection(provider, socket));
         var probe = provider.GetRequiredService<Probe>();
@@ -203,13 +208,14 @@ public sealed class AuditRemediationTests {
             probe.Release.TrySetResult();
             await UntilAsync(() => socket.WasDisposed);
         }
+
         Assert.That(probe.ScopeDisposed, Is.True);
         Assert.That(socket.Sent, Is.Empty);
     }
 
     [Test]
     public async Task ShutdownCloseHandshakeHasSameBoundedDeadline() {
-        using var provider = CreateProvider();
+        await using var provider = CreateProvider();
         var socket = new TestWebSocket { CloseBarrier = new TaskCompletionSource().Task };
         socket.EnqueueClose();
         await provider.GetRequiredService<WebSocketHandler>().AcceptAsync(CreateConnection(provider, socket)).WaitAsync(TimeSpan.FromSeconds(2));
@@ -258,25 +264,36 @@ public sealed class AuditRemediationTests {
     [Test]
     public async Task BroadcastSerializesOnceAndSharesBytesAcrossRecipients() {
         var converter = new BroadcastConverter();
-        using var provider = CreateProvider(options => options.JsonOptions.Converters.Add(converter));
+        await using var provider = CreateProvider(options => options.JsonOptions.Converters.Add(converter));
         var sockets = Enumerable.Range(0, 20).Select(_ => new TestWebSocket()).ToArray();
         var storage = provider.GetRequiredService<ConnectionStorage>();
-        foreach (var socket in sockets) storage.Add(CreateConnection(provider, socket));
+        foreach (var socket in sockets) {
+            storage.Add(CreateConnection(provider, socket));
+        }
+
         await provider.GetRequiredService<Broadcaster>().DeliverAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "one", null), default);
         Assert.That(converter.Writes, Is.EqualTo(1));
         var bytes = sockets[0].SentBuffers.Single();
         Assert.That(sockets.All(socket => ReferenceEquals(socket.SentBuffers.Single(), bytes)), Is.True);
-        foreach (var connection in storage.GetAll()) connection.Dispose();
+        foreach (var connection in storage.GetAll()) {
+            connection.Dispose();
+        }
     }
 
     [Test]
     public async Task PublisherCancellationDoesNotCancelDeliveryToOtherConnections() {
-        using var provider = CreateProvider();
-        foreach (var service in provider.GetServices<IHostedService>()) await service.StartAsync(default);
+        await using var provider = CreateProvider();
+        foreach (var service in provider.GetServices<IHostedService>()) {
+            await service.StartAsync(default);
+        }
+
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var sockets = Enumerable.Range(0, 3).Select(_ => new TestWebSocket { SendBarrier = gate.Task }).ToArray();
         var storage = provider.GetRequiredService<ConnectionStorage>();
-        foreach (var socket in sockets) storage.Add(CreateConnection(provider, socket));
+        foreach (var socket in sockets) {
+            storage.Add(CreateConnection(provider, socket));
+        }
+
         using var publisher = new CancellationTokenSource();
         var broadcast = provider.GetRequiredService<IBroadcaster>().BroadcastAsync("changed", publisher.Token);
         await Task.WhenAll(sockets.Select(socket => socket.SendStarted.Task)).WaitAsync(TimeSpan.FromSeconds(2));
@@ -285,28 +302,35 @@ public sealed class AuditRemediationTests {
         await broadcast.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.That(sockets.Select(socket => socket.Sent.Count), Is.All.EqualTo(1));
         Assert.That(sockets.Select(socket => socket.WasAborted), Is.All.False);
-        foreach (var connection in storage.GetAll()) connection.Dispose();
+        foreach (var connection in storage.GetAll()) {
+            connection.Dispose();
+        }
     }
 
     [Test]
     public async Task BroadcastStartsEveryRecipientWithoutWaitingForSlowOnes() {
-        using var provider = CreateProvider();
+        await using var provider = CreateProvider();
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var sockets = Enumerable.Range(0, Environment.ProcessorCount + 1).Select(_ => new TestWebSocket { SendBarrier = gate.Task }).ToArray();
         var storage = provider.GetRequiredService<ConnectionStorage>();
-        foreach (var socket in sockets) storage.Add(CreateConnection(provider, socket));
+        foreach (var socket in sockets) {
+            storage.Add(CreateConnection(provider, socket));
+        }
+
         var delivery = provider.GetRequiredService<Broadcaster>().DeliverAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "changed", null), default).AsTask();
         // More recipients than processors all start at once, so held sockets do not delay the rest.
         await Task.WhenAll(sockets.Select(socket => socket.SendStarted.Task)).WaitAsync(TimeSpan.FromSeconds(2));
         gate.SetResult();
         await delivery.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.That(sockets.Select(socket => socket.Sent.Count), Is.All.EqualTo(1));
-        foreach (var connection in storage.GetAll()) connection.Dispose();
+        foreach (var connection in storage.GetAll()) {
+            connection.Dispose();
+        }
     }
 
     [Test]
     public async Task ActionKeepsItsSessionWhenLogoutArrivesMeanwhile() {
-        using var provider = CreateProvider();
+        await using var provider = CreateProvider();
         var probe = provider.GetRequiredService<Probe>();
         var socket = new TestWebSocket();
         var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(CreateConnection(provider, socket));
@@ -354,7 +378,7 @@ public sealed class AuditRemediationTests {
 
     [Test]
     public async Task TransportlessConnectionTimeoutDoesNotBreakTheBroadcast() {
-        using var provider = CreateProvider(options => options.BroadcastSendTimeout = TimeSpan.FromMilliseconds(50));
+        await using var provider = CreateProvider(options => options.BroadcastSendTimeout = TimeSpan.FromMilliseconds(50));
         var storage = provider.GetRequiredService<ConnectionStorage>();
         var socket = new TestWebSocket();
         storage.Add(new TransportlessConnection());
@@ -362,7 +386,9 @@ public sealed class AuditRemediationTests {
         await provider.GetRequiredService<Broadcaster>().DeliverAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "changed", null), default).AsTask().WaitAsync(TimeSpan.FromSeconds(2));
         Assert.That(socket.Sent, Has.Count.EqualTo(1));
         Assert.That(provider.GetRequiredService<Probe>().Logs, Has.Some.Contains("Cannot abort"));
-        foreach (var connection in storage.GetAll()) connection.Dispose();
+        foreach (var connection in storage.GetAll()) {
+            connection.Dispose();
+        }
     }
 
     [Test]
@@ -378,15 +404,18 @@ public sealed class AuditRemediationTests {
 
     [Test]
     public async Task DataFieldSurvivesWhenWritingNullForResponsesAndBroadcasts() {
-        using var provider = CreateProvider(options => options.JsonOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull);
-        foreach (var service in provider.GetServices<IHostedService>()) await service.StartAsync(default);
+        await using var provider = CreateProvider(options => options.JsonOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull);
+        foreach (var service in provider.GetServices<IHostedService>()) {
+            await service.StartAsync(default);
+        }
+
         var socket = new TestWebSocket();
         var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(CreateConnection(provider, socket));
         socket.EnqueueReceive("{\"id\":\"empty\",\"action\":\"audit:nullable\"}");
         await UntilAsync(() => socket.Sent.Count == 1);
         await provider.GetRequiredService<IBroadcaster>().BroadcastAsync<object?>("changed", null);
         await UntilAsync(() => socket.Sent.Count == 2);
-        Assert.That(socket.Sent.Select(System.Text.Encoding.UTF8.GetString), Is.EqualTo(new[] { "{\"id\":\"empty\",\"data\":null}", "{\"id\":\"@\",\"action\":\"changed\",\"data\":null}" }));
+        Assert.That(socket.Sent.Select(Encoding.UTF8.GetString), Is.EqualTo(new[] { "{\"id\":\"empty\",\"data\":null}", "{\"id\":\"@\",\"action\":\"changed\",\"data\":null}" }));
         socket.EnqueueClose();
         await accept.WaitAsync(TimeSpan.FromSeconds(2));
     }
@@ -403,7 +432,7 @@ public sealed class AuditRemediationTests {
 
     [Test]
     public async Task AuthenticationFailureAndLogoutClearSessionAndIndexesWithoutClosing() {
-        using var provider = CreateProvider();
+        await using var provider = CreateProvider();
         var socket = new TestWebSocket();
         var connection = CreateConnection(provider, socket);
         var storage = provider.GetRequiredService<ConnectionStorage>();
@@ -413,14 +442,15 @@ public sealed class AuditRemediationTests {
             await UntilAsync(() => socket.Sent.Count == 1);
             socket.Sent.TryDequeue(out var bytes);
             var valid = token is "first" or "second" or "third" or "last";
-            Assert.That(System.Text.Encoding.UTF8.GetString(bytes!), Is.EqualTo(valid ? "auth:success" : "auth:failed"));
+            Assert.That(Encoding.UTF8.GetString(bytes!), Is.EqualTo(valid ? "auth:success" : "auth:failed"));
             Assert.That(connection.Session?.Id, Is.EqualTo(valid ? token : null));
             Assert.That(connection.HttpContext.User.Identity?.IsAuthenticated, Is.EqualTo(valid));
             Assert.That(storage.GetByGroup("session:first"), valid && token == "first" ? Has.Count.EqualTo(1) : Is.Empty);
         }
+
         socket.EnqueueReceive("logout");
         await UntilAsync(() => socket.Sent.Count == 1);
-        Assert.That(System.Text.Encoding.UTF8.GetString(socket.Sent.Single()), Is.EqualTo("logout:success"));
+        Assert.That(Encoding.UTF8.GetString(socket.Sent.Single()), Is.EqualTo("logout:success"));
         Assert.That(connection.Session, Is.Null);
         Assert.That(storage.GetBySession("last"), Is.Empty);
         Assert.That(connection.IsOpen, Is.True);
@@ -435,7 +465,10 @@ public sealed class AuditRemediationTests {
         var probe = new Probe();
         services.AddSingleton(probe);
         services.AddLogging(builder => builder.AddProvider(probe));
-        services.AddDarkWs(options => { options.ShutdownTimeout = TimeSpan.FromMilliseconds(100); configure?.Invoke(options); });
+        services.AddDarkWs(options => {
+            options.ShutdownTimeout = TimeSpan.FromMilliseconds(100);
+            configure?.Invoke(options);
+        });
         services.AddScoped<AuditHandler>();
         services.AddScoped<ScopeLifetime>();
         services.AddScoped<IDarkWsAuthenticator, AuditAuthenticator>();
@@ -446,9 +479,12 @@ public sealed class AuditRemediationTests {
     }
 
     private static WebSocketConnection CreateConnection(ServiceProvider provider, TestWebSocket socket) => new(socket, new DefaultHttpContext { RequestServices = provider }, null);
+
     private static async Task UntilAsync(Func<bool> condition) {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (!condition()) await Task.Delay(10, timeout.Token);
+        while (!condition()) {
+            await Task.Delay(10, timeout.Token);
+        }
     }
 
     public sealed class Probe : ILoggerProvider, ILogger {
@@ -457,44 +493,101 @@ public sealed class AuditRemediationTests {
         public bool ScopeDisposed;
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public System.Collections.Concurrent.ConcurrentQueue<string> Logs { get; } = new();
+        public ConcurrentQueue<string> Logs { get; } = new();
         public ILogger CreateLogger(string categoryName) => this;
         public void Dispose() { }
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) => Logs.Enqueue(formatter(state, exception));
     }
+
     public sealed class CloseHook : DarkWsMiddleware {
         public TaskCompletionSource<bool> CancelledOnEntry { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public override async Task OnCloseAsync(IDarkWsContextAccessor context) {
             var cancelled = context.ConnectionAborted.IsCancellationRequested;
             try { await Task.Delay(Timeout.Infinite, context.ConnectionAborted); } catch (OperationCanceledException) { }
+
             CancelledOnEntry.TrySetResult(cancelled);
         }
     }
+
     public sealed class ScopeLifetime(Probe probe) : IDisposable {
         public bool Disposed { get; private set; }
         public void Dispose() => Disposed = probe.ScopeDisposed = true;
     }
+
     [Handler("audit"), AllowAnonymous]
     public sealed class AuditHandler(Probe probe, ScopeLifetime lifetime) : HandlerBase {
-        [Action("input")] public IResponse Input(Payload input) { _ = lifetime; probe.Calls++; return Ok(input.Text); }
-        [Action("number")] public IResponse Number(int input) { probe.Calls++; return Ok(input); }
-        [Action("nullable")] public IResponse Nullable(string? input) { probe.Calls++; return Ok(input); }
-        [Action("nullable-number")] public IResponse NullableNumber(int? input) { probe.Calls++; return Ok(input); }
-        [Action("json-error")] public IResponse JsonError() => throw new JsonException("handler failure");
-        [Action("stubborn")] public async Task<IResponse> Stubborn() { probe.Started.TrySetResult(); await probe.Release.Task; return Ok(); }
-        [Action("cycle")] public IResponse Cycle() { var node = new Node(); node.Next = node; return Ok(node); }
-        [Action("deferred")] public IResponse Deferred() => Ok(Enumerable.Range(1, 2).Select(value => lifetime.Disposed ? throw new ObjectDisposedException(nameof(ScopeLifetime)) : value));
-        [Action("null")] public IResponse Null() => null!;
-        [Action("throwing-response")] public IResponse ThrowingResponse() => new FailingResponse(sendFirst: false);
-        [Action("partial")] public IResponse Partial() => new FailingResponse(sendFirst: true);
-        [Action("session-after-release")] public async Task<IResponse> SessionAfterRelease() { probe.Started.TrySetResult(); await probe.Release.Task; return Ok(Session.Id); }
-        [Action("user-authenticated")] public IResponse UserAuthenticated() => Ok(HttpContext.User.Identity?.IsAuthenticated == true);
+        [Action("input")]
+        public IResponse Input(Payload input) {
+            _ = lifetime;
+            probe.Calls++;
+            return Ok(input.Text);
+        }
+
+        [Action("number")]
+        public IResponse Number(int input) {
+            probe.Calls++;
+            return Ok(input);
+        }
+
+        [Action("nullable")]
+        public IResponse Nullable(string? input) {
+            probe.Calls++;
+            return Ok(input);
+        }
+
+        [Action("nullable-number")]
+        public IResponse NullableNumber(int? input) {
+            probe.Calls++;
+            return Ok(input);
+        }
+
+        [Action("json-error")]
+        public IResponse JsonError() => throw new JsonException("handler failure");
+
+        [Action("stubborn")]
+        public async Task<IResponse> Stubborn() {
+            probe.Started.TrySetResult();
+            await probe.Release.Task;
+            return Ok();
+        }
+
+        [Action("cycle")]
+        public IResponse Cycle() {
+            var node = new Node();
+            node.Next = node;
+            return Ok(node);
+        }
+
+        [Action("deferred")]
+        public IResponse Deferred() => Ok(Enumerable.Range(1, 2).Select(value => lifetime.Disposed ? throw new ObjectDisposedException(nameof(ScopeLifetime)) : value));
+
+        [Action("null")]
+        public IResponse Null() => null!;
+
+        [Action("throwing-response")]
+        public IResponse ThrowingResponse() => new FailingResponse(sendFirst: false);
+
+        [Action("partial")]
+        public IResponse Partial() => new FailingResponse(sendFirst: true);
+
+        [Action("session-after-release")]
+        public async Task<IResponse> SessionAfterRelease() {
+            probe.Started.TrySetResult();
+            await probe.Release.Task;
+            return Ok(Session.Id);
+        }
+
+        [Action("user-authenticated")]
+        public IResponse UserAuthenticated() => Ok(HttpContext.User.Identity?.IsAuthenticated == true);
     }
+
     public sealed class RejectingAuthenticator : IDarkWsAuthenticator {
         public ValueTask<IDarkWsSession?> AuthenticateAsync(HttpContext context, string? token, CancellationToken cancellationToken) => ValueTask.FromResult<IDarkWsSession?>(null);
     }
+
     private sealed class TransportlessConnection : IWebSocketConnection {
         public string Id { get; } = Guid.NewGuid().ToString("N");
         public WebSocket WebSocket => throw new NotSupportedException("This connection has no transport");
@@ -506,27 +599,45 @@ public sealed class AuditRemediationTests {
         public Task CloseAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public void Dispose() { }
     }
-    public sealed class Node { public Node? Next { get; set; } }
+
+    public sealed class Node {
+        public Node? Next { get; set; }
+    }
+
     private sealed class FailingResponse(bool sendFirst) : IResponse {
         public async Task WriteResultAsync(ResponseContext context, CancellationToken cancellationToken = default) {
-            if (sendFirst) await context.SendAsync(new { id = context.RequestId, data = 1 }, cancellationToken);
+            if (sendFirst) {
+                await context.SendAsync(new { id = context.RequestId, data = 1 }, cancellationToken);
+            }
+
             throw new InvalidOperationException("response failure");
         }
     }
+
     public sealed record Payload(string Text);
+
     public sealed class AuditAuthenticator : IDarkWsAuthenticator {
         public AuditAuthenticator(Probe probe) => Interlocked.Increment(ref probe.Authenticators);
+
         public ValueTask<IDarkWsSession?> AuthenticateAsync(HttpContext context, string? token, CancellationToken cancellationToken) {
-            if (token == "throws") throw new InvalidOperationException("test authentication failure");
+            if (token == "throws") {
+                throw new InvalidOperationException("test authentication failure");
+            }
+
             return ValueTask.FromResult<IDarkWsSession?>(string.IsNullOrEmpty(token) || token == "rejected" ? null : new TestSession(token, new ClaimsPrincipal(new ClaimsIdentity([], "Test"))));
         }
     }
+
     private sealed class BroadcastConverter : JsonConverter<BroadcastActionMessage> {
         public int Writes;
         public override BroadcastActionMessage Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => throw new NotSupportedException();
+
         public override void Write(Utf8JsonWriter writer, BroadcastActionMessage value, JsonSerializerOptions options) {
             Writes++;
-            writer.WriteStartObject(); writer.WriteString("id", value.Id); writer.WriteString("action", value.Action); writer.WriteEndObject();
+            writer.WriteStartObject();
+            writer.WriteString("id", value.Id);
+            writer.WriteString("action", value.Action);
+            writer.WriteEndObject();
         }
     }
 }

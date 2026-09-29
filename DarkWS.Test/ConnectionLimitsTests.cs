@@ -28,7 +28,7 @@ public sealed class ConnectionLimitsTests {
         services.AddDarkWs(options => options.MaxConcurrentRequestsPerConnection = limit);
         services.AddSingleton<RequestProbe>();
         services.AddScoped<SlowHandler>();
-        using var provider = services.BuildServiceProvider();
+        await using var provider = services.BuildServiceProvider();
         provider.GetRequiredService<DarkWsActionRegistry>().Add(typeof(SlowHandler));
         var probe = provider.GetRequiredService<RequestProbe>();
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -38,6 +38,7 @@ public sealed class ConnectionLimitsTests {
             for (var id = 0; id < 500; id++) {
                 socket.EnqueueReceive($$"""{"id":"{{id}}","action":"limits:slow"}""");
             }
+
             var connection = new WebSocketConnection(socket, new DefaultHttpContext { RequestServices = provider }, null);
             accepts.Add(provider.GetRequiredService<WebSocketHandler>().AcceptAsync(connection, cancellation.Token));
         }
@@ -48,12 +49,21 @@ public sealed class ConnectionLimitsTests {
             await UntilAsync(() => sockets.All(socket => socket.ReceiveCount == 2 * limit + 1));
             Assert.That(probe.Started, Is.EqualTo(limit * 2));
         } finally {
-            if (cancel) cancellation.Cancel();
+            if (cancel) {
+                cancellation.Cancel();
+            }
+
             probe.Release.TrySetResult();
             if (!cancel) {
-                while (sockets.Any(socket => socket.Sent.Count < 500)) await Task.Delay(10, cancellation.Token);
-                foreach (var socket in sockets) socket.EnqueueClose();
+                while (sockets.Any(socket => socket.Sent.Count < 500)) {
+                    await Task.Delay(10, cancellation.Token);
+                }
+
+                foreach (var socket in sockets) {
+                    socket.EnqueueClose();
+                }
             }
+
             await Task.WhenAll(accepts).WaitAsync(TimeSpan.FromSeconds(10));
         }
 
@@ -69,7 +79,7 @@ public sealed class ConnectionLimitsTests {
 
     [Test]
     public async Task SaturatedConnectionKeepsReadingAndAnswersPing() {
-        using var provider = CreateProvider(options => options.MaxConcurrentRequestsPerConnection = 1);
+        await using var provider = CreateProvider(options => options.MaxConcurrentRequestsPerConnection = 1);
         var probe = provider.GetRequiredService<RequestProbe>();
         var socket = new TestWebSocket();
         socket.EnqueueReceive("""{"id":"1","action":"limits:slow"}""");
@@ -88,7 +98,7 @@ public sealed class ConnectionLimitsTests {
 
     [Test]
     public async Task RequestWaitingLongerThanTheQueueTimeoutIsRejectedAsBusy() {
-        using var provider = CreateProvider(options => {
+        await using var provider = CreateProvider(options => {
             options.MaxConcurrentRequestsPerConnection = 1;
             options.RequestQueueTimeout = TimeSpan.FromMilliseconds(100);
         });
@@ -112,7 +122,7 @@ public sealed class ConnectionLimitsTests {
 
     [Test]
     public async Task CommandsWaitForAQueuePlaceInsteadOfBeingRejected() {
-        using var provider = CreateProvider(options => {
+        await using var provider = CreateProvider(options => {
             options.MaxConcurrentRequestsPerConnection = 1;
             options.RequestQueueTimeout = TimeSpan.FromMilliseconds(50);
         });
@@ -158,12 +168,18 @@ public sealed class ConnectionLimitsTests {
         var address = host.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
         using var socket = new ClientWebSocket();
         await socket.ConnectAsync(new Uri(address.Replace("http://", "ws://", StringComparison.Ordinal) + "/ws"), CancellationToken.None);
-        foreach (var id in new[] { "1", "2", "3" }) await socket.SendTextAsync($$"""{"id":"{{id}}","action":"limits:slow"}""");
+        foreach (var id in new[] { "1", "2", "3" }) {
+            await socket.SendTextAsync($$"""{"id":"{{id}}","action":"limits:slow"}""");
+        }
+
         _ = Task.Delay(TimeSpan.FromSeconds(1)).ContinueWith(_ => host.Services.GetRequiredService<RequestProbe>().Release.TrySetResult(), TaskScheduler.Default);
         var replies = new List<string>();
         // A pending receive also answers the server's keep-alive PINGs on this side.
-        while (replies.Count < 3) replies.Add(Encoding.UTF8.GetString(await socket.ReceiveRawMessage()));
-        Assert.That(replies, Is.EqualTo(new[] { "{\"id\":\"3\",\"error\":\"darkws:error:busy\"}", "{\"id\":\"1\"}", "{\"id\":\"2\"}" }));
+        while (replies.Count < 3) {
+            replies.Add(Encoding.UTF8.GetString(await socket.ReceiveRawMessage()));
+        }
+
+        Assert.That(replies, Is.EqualTo(["{\"id\":\"3\",\"error\":\"darkws:error:busy\"}", "{\"id\":\"1\"}", "{\"id\":\"2\"}"]));
         await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
         await host.StopAsync();
     }
@@ -171,7 +187,10 @@ public sealed class ConnectionLimitsTests {
     [Test]
     public async Task ReceiveIdleTimeoutResetsForFragmentsAndMessagesThenAbortsSilence() {
         var socket = new TestWebSocket { ReceiveDelay = TimeSpan.FromMilliseconds(60) };
-        for (var index = 0; index < 10; index++) socket.EnqueueReceive("x", index == 9);
+        for (var index = 0; index < 10; index++) {
+            socket.EnqueueReceive("x", index == 9);
+        }
+
         socket.EnqueueReceive("next");
         using var connection = new WebSocketConnection(socket, new DefaultHttpContext(), null) {
             ReceiveIdleTimeout = TimeSpan.FromMilliseconds(400)
@@ -227,7 +246,10 @@ public sealed class ConnectionLimitsTests {
         await lifecycle.Opened.Task.WaitAsync(timeout.Token);
         await lifecycle.Closed.Task.WaitAsync(timeout.Token);
         var storage = host.Services.GetRequiredService<ConnectionStorage>();
-        while (storage.GetAll().Count != 0) await Task.Delay(10, timeout.Token);
+        while (storage.GetAll().Count != 0) {
+            await Task.Delay(10, timeout.Token);
+        }
+
         Assert.That(storage.GetAll(), Is.Empty);
         await host.StopAsync(timeout.Token);
     }
@@ -249,11 +271,16 @@ public sealed class ConnectionLimitsTests {
             })).StartAsync();
         var address = host.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
         var endpoint = new Uri(address.Replace("http://", "ws://", StringComparison.Ordinal) + "/ws");
+
         async Task<HttpStatusCode> UpgradeAsync(string? origin) {
             using var socket = new ClientWebSocket();
             socket.Options.CollectHttpResponseDetails = true;
-            if (origin is not null) socket.Options.SetRequestHeader("Origin", origin);
+            if (origin is not null) {
+                socket.Options.SetRequestHeader("Origin", origin);
+            }
+
             try { await socket.ConnectAsync(endpoint, CancellationToken.None); } catch (WebSocketException) { }
+
             return socket.HttpStatusCode;
         }
 
@@ -277,7 +304,9 @@ public sealed class ConnectionLimitsTests {
 
     private static async Task UntilAsync(Func<bool> condition) {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (!condition()) await Task.Delay(10, timeout.Token);
+        while (!condition()) {
+            await Task.Delay(10, timeout.Token);
+        }
     }
 
     public sealed class RequestProbe {
@@ -305,10 +334,12 @@ public sealed class ConnectionLimitsTests {
     public sealed class ConnectionProbe : DarkWsMiddleware {
         public TaskCompletionSource Opened { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Closed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public override Task OnOpenAsync(IDarkWsContextAccessor context) {
             Opened.TrySetResult();
             return Task.CompletedTask;
         }
+
         public override Task OnCloseAsync(IDarkWsContextAccessor context) {
             Closed.TrySetResult();
             return Task.CompletedTask;

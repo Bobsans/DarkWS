@@ -8,6 +8,7 @@ public abstract class DarkWsException : Exception {
     /// <summary>Creates a controlled exception carrying a non-empty error code and optional cause.</summary>
     protected DarkWsException(string error, Exception? innerException = null)
         : base(ErrorResponse.ValidateError(error), innerException) { }
+
     /// <summary>Returns the controlled protocol response associated with this exception.</summary>
     public abstract IResponse GetResponse();
 }
@@ -23,6 +24,7 @@ public class ErrorResponseException : DarkWsException {
     public ErrorResponseException(string error, Exception? innerException) : base(error, innerException) {
         _error = error;
     }
+
     /// <summary>Returns the controlled protocol response associated with this exception.</summary>
     public override IResponse GetResponse() => new ErrorResponse(_error);
 }
@@ -40,6 +42,7 @@ public class ErrorResponseException<T> : DarkWsException {
         _error = error;
         _details = details;
     }
+
     /// <summary>Returns the controlled protocol response associated with this exception.</summary>
     public override IResponse GetResponse() => new ErrorResponse<T>(_error, _details);
 }

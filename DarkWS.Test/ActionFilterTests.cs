@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Net.WebSockets;
 using DarkWS.Abstractions;
 using DarkWS.Test.Project;
 using Microsoft.AspNetCore.Authorization;
@@ -94,7 +93,10 @@ public sealed class ActionFilterTests {
             probe.Payload = context.Payload;
             probe.SessionId = context.Session?.Id;
             probe.FilterScope = context.Services.GetRequiredService<ScopedProbe>();
-            if (context.Action.Name == "filters:block") return new ErrorResponse("blocked");
+            if (context.Action.Name == "filters:block") {
+                return new ErrorResponse("blocked");
+            }
+
             try {
                 var result = await next();
                 probe.Events.Enqueue("outer:after");

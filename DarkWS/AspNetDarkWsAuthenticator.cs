@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using DarkWS.Abstractions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;

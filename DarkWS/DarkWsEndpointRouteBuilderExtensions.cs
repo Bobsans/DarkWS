@@ -53,5 +53,4 @@ public static class DarkWsEndpointRouteBuilderExtensions {
                 .AcceptAsync(connection, cancellation.Token);
         });
     }
-
 }

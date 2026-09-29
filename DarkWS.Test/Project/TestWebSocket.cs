@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
+using System.Text;
 using System.Threading.Channels;
 
 namespace DarkWS.Test.Project;
@@ -38,12 +39,18 @@ public sealed class TestWebSocket : WebSocket {
     }
 
     public override async Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken) {
-        if (CloseBarrier is not null) await CloseBarrier.WaitAsync(cancellationToken);
+        if (CloseBarrier is not null) {
+            await CloseBarrier.WaitAsync(cancellationToken);
+        }
+
         _state = WebSocketState.Closed;
     }
 
     public override async Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken) {
-        if (CloseBarrier is not null) await CloseBarrier.WaitAsync(cancellationToken);
+        if (CloseBarrier is not null) {
+            await CloseBarrier.WaitAsync(cancellationToken);
+        }
+
         LastOutputCloseStatus = closeStatus;
         _state = WebSocketState.CloseSent;
     }
@@ -60,6 +67,7 @@ public sealed class TestWebSocket : WebSocket {
         if (ReceiveDelay > TimeSpan.Zero) {
             await Task.Delay(ReceiveDelay, receiveCancellation.Token);
         }
+
         var receive = await _receives.Reader.ReadAsync(receiveCancellation.Token);
         receive.Data.AsSpan().CopyTo(buffer.AsSpan());
         return new WebSocketReceiveResult(
@@ -81,11 +89,18 @@ public sealed class TestWebSocket : WebSocket {
         InterlockedExtensions.Max(ref _maxConcurrentSends, active);
         try {
             SendStarted.TrySetResult();
-            if (SendBarrier is not null) await (IgnoreSendCancellation ? SendBarrier : SendBarrier.WaitAsync(cancellationToken));
-            if (SendError is not null) throw SendError;
+            if (SendBarrier is not null) {
+                await (IgnoreSendCancellation ? SendBarrier : SendBarrier.WaitAsync(cancellationToken));
+            }
+
+            if (SendError is not null) {
+                throw SendError;
+            }
+
             if (SendDelay > TimeSpan.Zero) {
                 await Task.Delay(SendDelay, cancellationToken);
             }
+
             Sent.Enqueue(buffer.ToArray());
             SentBuffers.Enqueue(buffer.Array!);
         } finally {
@@ -94,7 +109,7 @@ public sealed class TestWebSocket : WebSocket {
     }
 
     public void EnqueueReceive(string data, bool endOfMessage = true) {
-        _receives.Writer.TryWrite((System.Text.Encoding.UTF8.GetBytes(data), endOfMessage, null));
+        _receives.Writer.TryWrite((Encoding.UTF8.GetBytes(data), endOfMessage, null));
     }
 
     public void EnqueueClose() {
@@ -114,6 +129,7 @@ internal static class InterlockedExtensions {
             if (previous == current) {
                 return;
             }
+
             current = previous;
         }
     }

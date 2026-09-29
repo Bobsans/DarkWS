@@ -15,10 +15,12 @@ internal sealed class DarkWsActionRegistry {
         if (type.GetCustomAttributes(inherit: true).OfType<IAuthorizeData>().Any()) {
             throw new InvalidOperationException($"Handler '{type.FullName}' uses unsupported [Authorize] metadata. DarkWS supports only [AllowAnonymous]; enforce policies and roles inside actions");
         }
+
         var handler = type.GetCustomAttribute<HandlerAttribute>();
         if (handler is not null && !IsValidName(handler.Name)) {
             throw new InvalidOperationException($"Handler '{type.FullName}' has invalid name '{handler.Name}'; names must be non-empty without surrounding whitespace");
         }
+
         var handlerName = handler?.Name;
         var classAllowsAnonymous = type.GetCustomAttribute<AllowAnonymousAttribute>() is not null;
 
@@ -27,6 +29,7 @@ internal sealed class DarkWsActionRegistry {
             if (action is null) {
                 continue;
             }
+
             if (method.GetCustomAttributes(inherit: true).OfType<IAuthorizeData>().Any()) {
                 throw new InvalidOperationException($"Action method '{type.FullName}.{method.Name}' uses unsupported [Authorize] metadata. DarkWS supports only [AllowAnonymous]; enforce policies and roles inside actions");
             }

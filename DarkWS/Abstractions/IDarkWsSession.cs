@@ -6,8 +6,10 @@ namespace DarkWS.Abstractions;
 public interface IDarkWsSession {
     /// <summary>Gets the stable identity for connection or session targeting.</summary>
     string Id { get; }
+
     /// <summary>Gets the principal used for action authorization.</summary>
     ClaimsPrincipal User { get; }
+
     /// <summary>Gets broadcast groups; storage snapshots membership on add or re-authentication.</summary>
     IReadOnlyCollection<string> Groups { get; }
 }

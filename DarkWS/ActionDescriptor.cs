@@ -13,11 +13,15 @@ internal abstract class ActionDescriptorBase(
     public bool AllowAnonymous { get; } = allowAnonymous;
 
     public object? DeserializeParameter(JsonElement? value, JsonSerializerOptions options) {
-        if (parameterType is null) return null;
+        if (parameterType is null) {
+            return null;
+        }
+
         var parameter = value?.Deserialize(parameterType, options);
         if (parameter is null && !allowsNullPayload) {
             throw new JsonException("A non-null payload is required");
         }
+
         return parameter;
     }
 

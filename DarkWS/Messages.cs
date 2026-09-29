@@ -25,7 +25,8 @@ public sealed record OkMessage(
 public sealed record ResponseMessage<T>(
     [property: JsonPropertyName("id")] string Id,
     // Written even under WhenWritingNull: a missing data field means "no data" to clients.
-    [property: JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.Never)] T? Data
+    [property: JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    T? Data
 );
 
 /// <summary>Error response carrying a stable code and optional typed details.</summary>
@@ -43,7 +44,8 @@ public sealed record ErrorMessage(
 public sealed record ErrorMessage<T>(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("error")] string Error,
-    [property: JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.Never)] T? Data
+    [property: JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    T? Data
 );
 
 /// <summary>Notification envelope containing the reserved id and application action.</summary>
@@ -61,7 +63,8 @@ public sealed record BroadcastActionMessage(
 /// <param name="Data">Optional result or notification data.</param>
 public sealed record BroadcastActionMessage<T>(
     [property: JsonPropertyName("action")] string Action,
-    [property: JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.Never)] T? Data
+    [property: JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    T? Data
 ) {
     /// <summary>Reserved notification id.</summary>
     [JsonPropertyName("id"), JsonPropertyOrder(-1)]

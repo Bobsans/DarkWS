@@ -22,12 +22,18 @@ Console.WriteLine($"# {System.Runtime.InteropServices.RuntimeInformation.Framewo
 Console.WriteLine("scenario,recipients,median_ms_per_operation,median_allocated_bytes_per_operation");
 foreach (var count in quick ? new[] { 100 } : new[] { 100, 1000, 10000 }) {
     await MeasureAsync("serialize-per-recipient", count, () => {
-        for (var index = 0; index < count; index++) consumed += JsonSerializer.SerializeToUtf8Bytes(envelope, json).Length;
+        for (var index = 0; index < count; index++) {
+            consumed += JsonSerializer.SerializeToUtf8Bytes(envelope, json).Length;
+        }
+
         return Task.CompletedTask;
     });
     await MeasureAsync("serialize-once", count, () => {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(envelope, json);
-        for (var index = 0; index < count; index++) consumed += bytes.Length;
+        for (var index = 0; index < count; index++) {
+            consumed += bytes.Length;
+        }
+
         return Task.CompletedTask;
     });
 
@@ -36,11 +42,21 @@ foreach (var count in quick ? new[] { 100 } : new[] { 100, 1000, 10000 }) {
     await host.StartAsync();
     var storage = host.Services.GetRequiredService<ConnectionStorage>();
     var connections = Enumerable.Range(0, count).Select(_ => new SinkConnection()).ToArray();
-    foreach (var connection in connections) storage.Add(connection);
+    foreach (var connection in connections) {
+        storage.Add(connection);
+    }
+
     var broadcaster = host.Services.GetRequiredService<IBroadcaster>();
     await MeasureAsync("in-memory-fanout", count, () => broadcaster.BroadcastAsync("changed", payload));
-    if (connections.Any(connection => connection.Sends != 2 + samples * iterations)) throw new InvalidOperationException("Incomplete fanout");
-    foreach (var connection in connections) { storage.Remove(connection); connection.Dispose(); }
+    if (connections.Any(connection => connection.Sends != 2 + samples * iterations)) {
+        throw new InvalidOperationException("Incomplete fanout");
+    }
+
+    foreach (var connection in connections) {
+        storage.Remove(connection);
+        connection.Dispose();
+    }
+
     await host.StopAsync();
 }
 
@@ -49,6 +65,7 @@ await MeasureAsync("parse-1000-requests", 1, () => {
         var message = JsonSerializer.Deserialize<InputMessage>(inputBytes, json) ?? throw new InvalidOperationException("Missing request");
         consumed += message.Id.Length + message.Action.Length;
     }
+
     return Task.CompletedTask;
 });
 GC.KeepAlive(consumed);
@@ -64,10 +81,14 @@ async Task MeasureAsync(string scenario, int recipients, Func<Task> operation) {
         GC.WaitForPendingFinalizers();
         var allocated = GC.GetTotalAllocatedBytes(precise: true);
         var started = Stopwatch.GetTimestamp();
-        for (var iteration = 0; iteration < iterations; iteration++) await operation();
+        for (var iteration = 0; iteration < iterations; iteration++) {
+            await operation();
+        }
+
         times[sample] = Stopwatch.GetElapsedTime(started).TotalMilliseconds / iterations;
         allocations[sample] = (GC.GetTotalAllocatedBytes(precise: true) - allocated) / (double)iterations;
     }
+
     Array.Sort(times);
     Array.Sort(allocations);
     Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{scenario},{recipients},{times[samples / 2]:F4},{allocations[samples / 2]:F0}"));
@@ -81,12 +102,17 @@ sealed class SinkConnection : IWebSocketConnection {
     public HttpContext HttpContext { get; } = new DefaultHttpContext();
     public IDarkWsSession? Session => null;
     public bool IsOpen => true;
+
     public Task SendAsync(byte[] data, CancellationToken cancellationToken = default) {
         cancellationToken.ThrowIfCancellationRequested();
-        if (data.Length == 0) throw new InvalidOperationException("Empty broadcast");
+        if (data.Length == 0) {
+            throw new InvalidOperationException("Empty broadcast");
+        }
+
         Interlocked.Increment(ref _sends);
         return Task.CompletedTask;
     }
+
     public Task<ReceivedMessage> ReceiveMessageAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public Task CloseAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     public void Dispose() { }

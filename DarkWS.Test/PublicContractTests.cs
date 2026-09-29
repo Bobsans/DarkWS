@@ -93,7 +93,10 @@ public sealed class PublicContractTests {
             (() => DarkWsEndpointRouteBuilderExtensions.MapDarkWs(null!), "endpoints"),
             (() => new ServiceCollection().AddDarkWs().AddHandlersFromAssembly(null!), "assembly")
         };
-        foreach (var (call, parameter) in cases) Assert.That(Assert.Throws<ArgumentNullException>(call)!.ParamName, Is.EqualTo(parameter));
+        foreach (var (call, parameter) in cases) {
+            Assert.That(Assert.Throws<ArgumentNullException>(call)!.ParamName, Is.EqualTo(parameter));
+        }
+
         Assert.That(Assert.ThrowsAsync<ArgumentNullException>(async () => await connection.SendAsync(null!))!.ParamName, Is.EqualTo("data"));
         foreach (var response in new IResponse[] { new SuccessResponse(), new SuccessResponse<int>(1), new ErrorResponse("error"), new ErrorResponse<int>("error", 1) }) {
             Assert.That(Assert.Throws<ArgumentNullException>(() => response.WriteResultAsync(null!))!.ParamName, Is.EqualTo("context"));

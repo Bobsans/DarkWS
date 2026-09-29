@@ -79,7 +79,10 @@ internal sealed class Broadcaster(
         object notification = message.Data.HasValue
             ? new BroadcastActionMessage<JsonElement>(message.Action, message.Data.Value)
             : new BroadcastActionMessage(message.Action);
-        if (connections.Count == 0) return;
+        if (connections.Count == 0) {
+            return;
+        }
+
         var bytes = JsonSerializer.SerializeToUtf8Bytes(notification, _options.JsonOptions);
 
         // Sends are asynchronous I/O: start every recipient at once so slow sockets cannot delay the rest.

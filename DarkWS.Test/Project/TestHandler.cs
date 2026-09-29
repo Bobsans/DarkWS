@@ -1,4 +1,5 @@
 using DarkWS.Abstractions;
+using Microsoft.AspNetCore.Authorization;
 
 namespace DarkWS.Test.Project;
 
@@ -34,7 +35,7 @@ public sealed class TestHandler(
     public sealed record SessionResult(string Injected, string Handler, string? Accessor, bool HasAspNetSession);
 }
 
-[Handler("public"), Microsoft.AspNetCore.Authorization.AllowAnonymous]
+[Handler("public"), AllowAnonymous]
 public sealed class PublicHandler : HandlerBase {
     [Action("get")]
     public IResponse Get() => Ok("public result");

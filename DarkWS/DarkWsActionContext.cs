@@ -14,12 +14,16 @@ public sealed class DarkWsActionContext {
 
     /// <summary>Gets the same action metadata exposed by the message context accessor.</summary>
     public DarkWsActionInfo Action { get; }
+
     /// <summary>Gets the deserialized action payload, or null when omitted.</summary>
     public object? Payload { get; }
+
     /// <summary>Gets the session captured for this action, or null for an anonymous request.</summary>
     public IDarkWsSession? Session { get; }
+
     /// <summary>Gets the current message scope's service provider.</summary>
     public IServiceProvider Services { get; }
+
     /// <summary>Gets the token signaled when the connection stops.</summary>
     public CancellationToken CancellationToken { get; }
 }

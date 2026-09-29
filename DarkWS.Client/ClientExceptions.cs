@@ -13,12 +13,16 @@ public sealed class DarkWsResponseException : Exception {
         RequestId = requestId;
         Action = action;
     }
+
     /// <summary>Server error code, possibly empty.</summary>
     public string Code { get; }
+
     /// <summary>Optional server error data, independent of receive buffers.</summary>
     public JsonElement? ErrorData { get; }
+
     /// <summary>Correlated request identifier, or empty for a text system command.</summary>
     public string RequestId { get; }
+
     /// <summary>Requested action.</summary>
     public string Action { get; }
 }
@@ -31,8 +35,10 @@ public sealed class DarkWsConnectionException : Exception {
         CloseStatus = closeStatus;
         CloseReason = closeReason;
     }
+
     /// <summary>Peer close status, when available.</summary>
     public WebSocketCloseStatus? CloseStatus { get; }
+
     /// <summary>Peer-provided close reason. May contain application data; excluded from Message.</summary>
     public string? CloseReason { get; }
 }
@@ -41,8 +47,10 @@ public sealed class DarkWsConnectionException : Exception {
 public enum DarkWsTimeoutStage {
     /// <summary>Waiting for a ready connection.</summary>
     Connection,
+
     /// <summary>Waiting for the send gate or writing to the socket.</summary>
     Send,
+
     /// <summary>Waiting for a response after a successful send.</summary>
     Response
 }
@@ -51,6 +59,7 @@ public enum DarkWsTimeoutStage {
 public sealed class DarkWsTimeoutException : TimeoutException {
     /// <summary>Creates a timeout for the given stage.</summary>
     public DarkWsTimeoutException(DarkWsTimeoutStage stage) : base($"The DarkWS {stage} operation timed out.") => Stage = stage;
+
     /// <summary>The expired stage.</summary>
     public DarkWsTimeoutStage Stage { get; }
 }
@@ -59,6 +68,7 @@ public sealed class DarkWsTimeoutException : TimeoutException {
 public sealed class DarkWsProtocolException : Exception {
     /// <summary>Creates a protocol error with the close status used for fatal wire violations.</summary>
     public DarkWsProtocolException(string message, WebSocketCloseStatus closeStatus = WebSocketCloseStatus.ProtocolError) : base(message) => CloseStatus = closeStatus;
+
     /// <summary>Close status used when the violation affects the connection.</summary>
     public WebSocketCloseStatus CloseStatus { get; }
 }

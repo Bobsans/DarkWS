@@ -1,3 +1,5 @@
+using System.Net.WebSockets;
+using System.Security.Claims;
 using System.Text.Json;
 using DarkWS.Abstractions;
 using DarkWS.Test.Project;
@@ -142,7 +144,7 @@ public sealed class BroadcastTests {
         await host.StartAsync();
         var socket = new TestWebSocket();
         host.Services.GetRequiredService<ConnectionStorage>().Add(CreateConnection(socket, "one"));
-        socket.SetState(System.Net.WebSockets.WebSocketState.Closed);
+        socket.SetState(WebSocketState.Closed);
 
         await host.Services.GetRequiredService<IBroadcaster>().BroadcastAsync("ignored", new { Value = 1 });
 
@@ -181,8 +183,8 @@ public sealed class BroadcastTests {
     }
 
     private static WebSocketConnection CreateConnection(TestWebSocket socket, string sessionId) {
-        var user = new System.Security.Claims.ClaimsPrincipal(
-            new System.Security.Claims.ClaimsIdentity([], "Test")
+        var user = new ClaimsPrincipal(
+            new ClaimsIdentity([], "Test")
         );
         return new WebSocketConnection(socket, new DefaultHttpContext(), new TestSession(sessionId, user));
     }

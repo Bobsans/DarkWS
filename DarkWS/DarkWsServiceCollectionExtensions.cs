@@ -18,7 +18,10 @@ public static class DarkWsServiceCollectionExtensions {
         }
 
         var options = services.AddOptions<DarkWsOptions>();
-        if (configure is not null) options.Configure(configure);
+        if (configure is not null) {
+            options.Configure(configure);
+        }
+
         options.Validate(value => value.MaxMessageSizeBytes > 0, "MaxMessageSizeBytes must be positive")
             .Validate(value => value.MaxConcurrentRequestsPerConnection > 0, "MaxConcurrentRequestsPerConnection must be positive")
             .Validate(value => IsValidTimeout(value.KeepAliveInterval), "KeepAliveInterval must be a positive timer duration")

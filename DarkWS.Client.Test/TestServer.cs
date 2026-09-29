@@ -30,7 +30,10 @@ internal sealed class TestServer : IAsyncDisposable {
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
-        if (darkWs) builder.Services.AddDarkWs().AddHandlersFromAssemblyContaining<EchoHandler>().AddAuthenticator<TestAuthenticator, TestAuthenticator.TestSession>();
+        if (darkWs) {
+            builder.Services.AddDarkWs().AddHandlersFromAssemblyContaining<EchoHandler>().AddAuthenticator<TestAuthenticator, TestAuthenticator.TestSession>();
+        }
+
         var app = builder.Build();
         var server = new TestServer(app);
         app.UseWebSockets();
@@ -38,15 +41,24 @@ internal sealed class TestServer : IAsyncDisposable {
             Interlocked.Increment(ref server.Connections);
             await next(context);
         });
-        if (darkWs) app.MapDarkWs("/ws");
-        else app.Map("/ws", async context => {
-            if (httpStatus.HasValue) { context.Response.StatusCode = httpStatus.Value; return; }
-            using var socket = await context.WebSockets.AcceptWebSocketAsync();
-            server._sockets.Add(socket);
-            server._accepted.Writer.TryWrite(socket);
-            try { await Task.Delay(Timeout.Infinite, server._stop.Token); }
-            catch (OperationCanceledException) { }
-        });
+        if (darkWs) {
+            app.MapDarkWs("/ws");
+        } else {
+            app.Map("/ws", async context => {
+                if (httpStatus.HasValue) {
+                    context.Response.StatusCode = httpStatus.Value;
+                    return;
+                }
+
+                using var socket = await context.WebSockets.AcceptWebSocketAsync();
+                server._sockets.Add(socket);
+                server._accepted.Writer.TryWrite(socket);
+                try {
+                    await Task.Delay(Timeout.Infinite, server._stop.Token);
+                } catch (OperationCanceledException) { }
+            });
+        }
+
         await app.StartAsync();
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
         server.Endpoint = new Uri(address.Replace("http://", "ws://", StringComparison.Ordinal) + "/ws");
@@ -54,6 +66,7 @@ internal sealed class TestServer : IAsyncDisposable {
     }
 
     internal async Task<WebSocket> AcceptAsync() => await _accepted.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
     internal static async Task<string> ReadAsync(WebSocket socket) {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         using var output = new MemoryStream();
@@ -61,20 +74,31 @@ internal sealed class TestServer : IAsyncDisposable {
         WebSocketReceiveResult result;
         do {
             result = await socket.ReceiveAsync(buffer, timeout.Token);
-            if (result.MessageType == WebSocketMessageType.Close) return "close";
+            if (result.MessageType == WebSocketMessageType.Close) {
+                return "close";
+            }
+
             output.Write(buffer, 0, result.Count);
         } while (!result.EndOfMessage);
+
         return Encoding.UTF8.GetString(output.ToArray());
     }
+
     internal static Task SendAsync(WebSocket socket, string value) => socket.SendAsync(Encoding.UTF8.GetBytes(value), WebSocketMessageType.Text, true, CancellationToken.None);
+
     internal static async Task<JsonElement> RequestAsync(WebSocket socket) {
         using var document = JsonDocument.Parse(await ReadAsync(socket));
         return document.RootElement.Clone();
     }
+
     internal static Task ReplyAsync(WebSocket socket, JsonElement request, string fields = "\"data\":42") =>
         SendAsync(socket, "{\"id\":\"" + request.GetProperty("id").GetString() + "\"" + (fields.Length > 0 ? "," + fields : "") + "}");
+
     public async ValueTask DisposeAsync() {
-        foreach (var socket in _sockets) socket.Abort();
+        foreach (var socket in _sockets) {
+            socket.Abort();
+        }
+
         _stop.Cancel();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await _app.StopAsync(timeout.Token);
@@ -87,10 +111,13 @@ internal sealed class TestServer : IAsyncDisposable {
 public sealed class EchoHandler : HandlerBase {
     [Action("value")]
     public IResponse Value(JsonElement? value) => Ok(value);
+
     [Action("empty")]
     public IResponse Empty() => Ok();
+
     [Action("error")]
     public IResponse Error() => throw new ErrorResponseException<int>("test:rejected", 7);
+
     [Action("notify")]
     public async Task<IResponse> NotifyAsync() {
         await BroadcastToSelfAsync("changed", new { Value = 11 });
@@ -107,6 +134,7 @@ public sealed class PrivateHandler : HandlerBase {
 public sealed class TestAuthenticator : IDarkWsAuthenticator {
     public ValueTask<IDarkWsSession?> AuthenticateAsync(HttpContext context, string? token, CancellationToken cancellationToken) =>
         ValueTask.FromResult<IDarkWsSession?>(token == "valid" ? new TestSession() : null);
+
     public sealed class TestSession : IDarkWsSession {
         public string Id => "test";
         public ClaimsPrincipal User => new(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "test")], "test"));

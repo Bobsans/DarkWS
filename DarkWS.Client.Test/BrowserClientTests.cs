@@ -7,7 +7,7 @@ namespace DarkWS.Client.Test;
 // The browser package, compiled from source, runs on Node.js's WHATWG WebSocket against a real DarkWS server.
 [TestFixture]
 public sealed class BrowserClientTests {
-    private const string Script = """
+    private const string SCRIPT = """
         import DarkWs from "./index.js";
 
         const client = new DarkWs({
@@ -30,14 +30,17 @@ public sealed class BrowserClientTests {
     public async Task BrowserClientSpeaksTheServerProtocol() {
         var package = Path.Combine(RepositoryRoot(), "packages", "darkws");
         var compiler = Path.Combine(package, "node_modules", "typescript", "bin", "tsc");
-        if (!File.Exists(compiler)) Assert.Ignore("Run npm ci --prefix packages/darkws to install the browser package tools.");
+        if (!File.Exists(compiler)) {
+            Assert.Ignore("Run npm ci --prefix packages/darkws to install the browser package tools.");
+        }
+
         var output = Directory.CreateTempSubdirectory("darkws-browser-");
         try {
             await NodeAsync(compiler, "-p", Path.Combine(package, "tsconfig.json"), "--outDir", output.FullName,
                 "--declaration", "false", "--declarationMap", "false", "--sourceMap", "false");
             await File.WriteAllTextAsync(Path.Combine(output.FullName, "package.json"), """{ "type": "module" }""");
             var script = Path.Combine(output.FullName, "contract.mjs");
-            await File.WriteAllTextAsync(script, Script);
+            await File.WriteAllTextAsync(script, SCRIPT);
             await using var server = await TestServer.StartAsync(darkWs: true);
 
             using var results = JsonDocument.Parse(await NodeAsync(script, server.Endpoint.Authority));
@@ -56,7 +59,10 @@ public sealed class BrowserClientTests {
 
     private static async Task<string> NodeAsync(params string[] arguments) {
         var start = new ProcessStartInfo("node") { RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        foreach (var argument in arguments) {
+            start.ArgumentList.Add(argument);
+        }
+
         using var process = Process.Start(start)!;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
@@ -67,14 +73,18 @@ public sealed class BrowserClientTests {
             process.Kill(entireProcessTree: true);
             throw;
         }
+
         Assert.That(process.ExitCode, Is.Zero, await error);
         return await output;
     }
 
     private static string RepositoryRoot() {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent) {
-            if (File.Exists(Path.Combine(directory.FullName, "DarkWS.sln"))) return directory.FullName;
+            if (File.Exists(Path.Combine(directory.FullName, "DarkWS.sln"))) {
+                return directory.FullName;
+            }
         }
+
         throw new InvalidOperationException("DarkWS.sln was not found above the test output directory");
     }
 }

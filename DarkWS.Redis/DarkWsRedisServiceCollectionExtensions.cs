@@ -17,6 +17,7 @@ public static class DarkWsRedisServiceCollectionExtensions {
         if (services.Any(service => service.ServiceType == typeof(RedisDarkWsOptions))) {
             throw new InvalidOperationException("AddDarkWsRedis must only be called once per service collection");
         }
+
         services.AddSingleton(new RedisDarkWsOptions(channel));
         services.Replace(ServiceDescriptor.Singleton<IDarkWsBackplane, RedisDarkWsBackplane>());
         return services;

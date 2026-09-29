@@ -104,7 +104,7 @@ public sealed class RegistrationTests {
 
     public abstract class TwoParameters : HandlerBase {
         [Action("invalid")]
-        public IResponse Invalid(int first, int second) => Ok();
+        public IResponse Invalid(int first, int second) => Ok(first + second);
     }
 
     public abstract class ValueTaskReturn : HandlerBase {
@@ -124,12 +124,12 @@ public sealed class RegistrationTests {
 
     public abstract class RefParameter : HandlerBase {
         [Action("invalid")]
-        public IResponse Invalid(ref int value) => Ok();
+        public IResponse Invalid(ref int value) => Ok(value);
     }
 
     public abstract class SpanParameter : HandlerBase {
         [Action("invalid")]
-        public IResponse Invalid(Span<int> value) => Ok();
+        public IResponse Invalid(Span<int> value) => Ok(value.Length);
     }
 
     public abstract class StaticMethod : HandlerBase {

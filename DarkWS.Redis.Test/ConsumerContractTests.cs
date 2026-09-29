@@ -35,18 +35,33 @@ public sealed class ConsumerContractTests {
         var storage = new ConnectionStorage();
         var connections = Enumerable.Range(0, 10000).Select(index => new ConsumerConnection(index.ToString(),
             new CountingSession(index.ToString(), [index < 10 ? "small" : "other"]))).ToArray();
-        foreach (var connection in connections) storage.Add(connection);
-        foreach (var connection in connections) ((CountingSession)connection.Session!).Reads = 0;
-        for (var index = 0; index < 100; index++) Assert.That(storage.GetByGroup("small"), Has.Count.EqualTo(10));
+        foreach (var connection in connections) {
+            storage.Add(connection);
+        }
+
+        foreach (var connection in connections) {
+            ((CountingSession)connection.Session!).Reads = 0;
+        }
+
+        for (var index = 0; index < 100; index++) {
+            Assert.That(storage.GetByGroup("small"), Has.Count.EqualTo(10));
+        }
+
         Assert.That(connections.Sum(connection => ((CountingSession)connection.Session!).Reads), Is.Zero);
 
         // Comparative evidence only: machine speed is not a correctness assertion.
         const int iterations = 500;
         var timer = Stopwatch.StartNew();
-        for (var index = 0; index < iterations; index++) _ = connections.Where(connection => connection.Session!.Groups.Contains("small")).ToArray();
+        for (var index = 0; index < iterations; index++) {
+            _ = connections.Where(connection => connection.Session!.Groups.Contains("small")).ToArray();
+        }
+
         var scanTime = timer.Elapsed.TotalMilliseconds;
         timer.Restart();
-        for (var index = 0; index < iterations; index++) _ = storage.GetByGroup("small");
+        for (var index = 0; index < iterations; index++) {
+            _ = storage.GetByGroup("small");
+        }
+
         TestContext.Progress.WriteLine($"DW-016: 10000 connections / 10 recipients / {iterations} lookups: scan={scanTime:F2}ms, indexed={timer.Elapsed.TotalMilliseconds:F2}ms");
     }
 
@@ -69,7 +84,13 @@ public sealed class ConsumerContractTests {
         public int Reads;
         public string Id => id;
         public ClaimsPrincipal User { get; } = new();
-        public IReadOnlyCollection<string> Groups { get { Reads++; return groups; } }
+
+        public IReadOnlyCollection<string> Groups {
+            get {
+                Reads++;
+                return groups;
+            }
+        }
     }
 
     private sealed class ConsumerConnection(string id, IDarkWsSession? session) : IWebSocketConnection {
@@ -80,8 +101,17 @@ public sealed class ConsumerContractTests {
         public bool IsOpen { get; private set; } = true;
         public byte[]? Sent { get; private set; }
         public Task<ReceivedMessage> ReceiveMessageAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task SendAsync(byte[] data, CancellationToken cancellationToken = default) { Sent = data; return Task.CompletedTask; }
-        public Task CloseAsync(CancellationToken cancellationToken = default) { IsOpen = false; return Task.CompletedTask; }
+
+        public Task SendAsync(byte[] data, CancellationToken cancellationToken = default) {
+            Sent = data;
+            return Task.CompletedTask;
+        }
+
+        public Task CloseAsync(CancellationToken cancellationToken = default) {
+            IsOpen = false;
+            return Task.CompletedTask;
+        }
+
         public void Dispose() => IsOpen = false;
     }
 }

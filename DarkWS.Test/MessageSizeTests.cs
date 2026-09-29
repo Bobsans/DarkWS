@@ -13,8 +13,13 @@ public sealed class MessageSizeTests {
     [TestCase(true)]
     public async Task ExactLimitIsAcceptedAndResetsForNextMessage(bool fragmented) {
         var socket = new TestWebSocket();
-        if (fragmented) { socket.EnqueueReceive("ab", false); socket.EnqueueReceive("cde"); }
-        else socket.EnqueueReceive("abcde");
+        if (fragmented) {
+            socket.EnqueueReceive("ab", false);
+            socket.EnqueueReceive("cde");
+        } else {
+            socket.EnqueueReceive("abcde");
+        }
+
         socket.EnqueueReceive("12345");
         using var connection = new WebSocketConnection(socket, new DefaultHttpContext(), null, 5);
         Assert.That(Encoding.UTF8.GetString((await connection.ReceiveMessageAsync()).Data), Is.EqualTo("abcde"));
@@ -26,8 +31,13 @@ public sealed class MessageSizeTests {
     [TestCase(true)]
     public async Task OversizeClosesBeforeEndOfMessage(bool fragmented) {
         var socket = new TestWebSocket();
-        if (fragmented) { socket.EnqueueReceive("abc", false); socket.EnqueueReceive("def", false); }
-        else socket.EnqueueReceive("abcdef", false);
+        if (fragmented) {
+            socket.EnqueueReceive("abc", false);
+            socket.EnqueueReceive("def", false);
+        } else {
+            socket.EnqueueReceive("abcdef", false);
+        }
+
         using var connection = new WebSocketConnection(socket, new DefaultHttpContext(), null, 5);
         var message = await connection.ReceiveMessageAsync();
         Assert.That(message.Data, Is.Empty);

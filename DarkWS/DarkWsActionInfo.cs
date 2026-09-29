@@ -13,10 +13,13 @@ public sealed class DarkWsActionInfo {
 
     /// <summary>Gets the registered action name, including the handler prefix when present.</summary>
     public string Name { get; }
+
     /// <summary>Gets the concrete handler type.</summary>
     public Type HandlerType { get; }
+
     /// <summary>Gets the action method.</summary>
     public MethodInfo Method { get; }
+
     /// <summary>Gets attributes on the action method, including inherited attributes.</summary>
     public IReadOnlyList<Attribute> Attributes { get; }
 }

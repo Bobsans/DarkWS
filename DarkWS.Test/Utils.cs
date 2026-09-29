@@ -36,6 +36,7 @@ public static class Utils {
                 result = await webSocket.ReceiveAsync(buffer, CancellationToken.None);
                 message.Write(buffer, 0, result.Count);
             } while (!result.EndOfMessage);
+
             return message.ToArray();
         } finally {
             ArrayPool<byte>.Shared.Return(buffer);

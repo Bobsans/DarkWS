@@ -70,14 +70,17 @@ internal sealed class WebSocketHandler(
                                 await Task.WhenAny(tasks).WaitAsync(requests.Token);
                                 tasks.RemoveAll(it => it.IsCompleted);
                             }
+
                             tasks.Add(ProcessMessageAsync(input, connection, requests.Token));
                         }
+
                         queue.Reader.TryRead(out _);
                     }
                 }
             } catch (OperationCanceledException) when (requests.IsCancellationRequested && !cancellationToken.IsCancellationRequested) {
                 // The reader stopped: the peer closed or the transport failed. Its outcome is observed below.
             }
+
             await reader;
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             Log.Cancelled(logger, null);
@@ -147,6 +150,7 @@ internal sealed class WebSocketHandler(
             if (message is null || string.IsNullOrWhiteSpace(message.Id) || DarkWsProtocol.IsReservedRequestId(message.Id) || string.IsNullOrWhiteSpace(message.Action)) {
                 throw new JsonException("Request id and action are required");
             }
+
             return message;
         } catch (JsonException error) {
             Log.InvalidRequest(logger, error);
@@ -155,6 +159,7 @@ internal sealed class WebSocketHandler(
                 await new ErrorResponse(_options.InvalidRequestError)
                     .WriteResultAsync(new ResponseContext(connection, DarkWsProtocol.IsReservedRequestId(requestId) ? string.Empty : requestId, _options), cancellationToken);
             }
+
             return null;
         }
     }
@@ -207,6 +212,7 @@ internal sealed class WebSocketHandler(
                 Log.InvalidPayload(logger, message.Action, error);
                 return new ErrorResponse(_options.InvalidRequestError);
             }
+
             var context = services.GetRequiredService<DarkWsContextAccessor>();
             context.Initialize(connection, cancellationToken, session, action.Action);
 
@@ -215,6 +221,7 @@ internal sealed class WebSocketHandler(
             }
 
             var filterContext = new DarkWsActionContext(action.Action, parameter, session, services, cancellationToken);
+
             async ValueTask<IResponse> InvokeHandlerAsync() {
                 var handler = (HandlerBase)services.GetRequiredService(action.HandlerType);
                 handler.Initialize(this, context, services);
@@ -227,17 +234,26 @@ internal sealed class WebSocketHandler(
                 var next = invoke;
                 invoke = () => filter.InvokeAsync(filterContext, next);
             }
-            var result = await invoke()
-                ?? throw new InvalidOperationException($"Action {message.Action} returned no response");
-            if (logger.IsEnabled(LogLevel.Debug)) Log.Completed(logger, message.Action, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, null);
+
+            var result = await invoke() ?? throw new InvalidOperationException($"Action {message.Action} returned no response");
+            if (logger.IsEnabled(LogLevel.Debug)) {
+                Log.Completed(logger, message.Action, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, null);
+            }
+
             return result;
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             throw;
         } catch (DarkWsException error) {
-            if (logger.IsEnabled(LogLevel.Debug)) Log.ControlledError(logger, message.Action, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, error);
+            if (logger.IsEnabled(LogLevel.Debug)) {
+                Log.ControlledError(logger, message.Action, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, error);
+            }
+
             return error.GetResponse();
         } catch (Exception error) {
-            if (logger.IsEnabled(LogLevel.Warning)) Log.ActionFailed(logger, message.Action, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, error);
+            if (logger.IsEnabled(LogLevel.Warning)) {
+                Log.ActionFailed(logger, message.Action, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, error);
+            }
+
             return new ErrorResponse(_options.RequestFailedError);
         }
     }
@@ -317,9 +333,13 @@ internal sealed class WebSocketHandler(
 
         if (reader is not null) {
             // A reader still waiting for data after the close attempt would keep the connection undisposed.
-            if (!reader.IsCompleted) connection.WebSocket.Abort();
+            if (!reader.IsCompleted) {
+                connection.WebSocket.Abort();
+            }
+
             tasks.Add(reader);
         }
+
         _ = DisposeWhenCompletedAsync(Task.WhenAll(tasks), connection, requests);
     }
 
@@ -360,38 +380,55 @@ internal sealed class WebSocketHandler(
     private static class Log {
         public static readonly Action<ILogger, Exception?> Cancelled =
             LoggerMessage.Define(LogLevel.Debug, new EventId(1, nameof(Cancelled)), "WebSocket operation cancelled");
+
         public static readonly Action<ILogger, Exception?> Closed =
             LoggerMessage.Define(LogLevel.Debug, new EventId(2, nameof(Closed)), "WebSocket closed");
+
         public static readonly Action<ILogger, Exception?> HandlerFailed =
             LoggerMessage.Define(LogLevel.Warning, new EventId(3, nameof(HandlerFailed)), "WebSocket handler failed");
+
         public static readonly Action<ILogger, Exception?> InvalidRequest =
             LoggerMessage.Define(LogLevel.Debug, new EventId(4, nameof(InvalidRequest)), "Invalid WebSocket request");
+
         public static readonly Action<ILogger, string, Exception?> RequestCancelled =
             LoggerMessage.Define<string>(LogLevel.Debug, new EventId(5, nameof(RequestCancelled)), "Request {RequestId} cancelled during connection shutdown");
+
         public static readonly Action<ILogger, string, Exception?> ResponseClosed =
             LoggerMessage.Define<string>(LogLevel.Debug, new EventId(6, nameof(ResponseClosed)), "Connection closed while responding to {RequestId}");
+
         public static readonly Action<ILogger, string, Exception?> ResponseFailed =
             LoggerMessage.Define<string>(LogLevel.Warning, new EventId(7, nameof(ResponseFailed)), "Cannot process or send response for {RequestId}");
+
         public static readonly Action<ILogger, string, Exception?> InvalidPayload =
             LoggerMessage.Define<string>(LogLevel.Debug, new EventId(8, nameof(InvalidPayload)), "Invalid payload for {Action}");
+
         public static readonly Action<ILogger, string, long, Exception?> Completed =
             LoggerMessage.Define<string, long>(LogLevel.Debug, new EventId(9, nameof(Completed)), "{Action} completed in {Duration}ms");
+
         public static readonly Action<ILogger, string, long, Exception?> ControlledError =
             LoggerMessage.Define<string, long>(LogLevel.Debug, new EventId(10, nameof(ControlledError)), "{Action} returned an error in {Duration}ms");
+
         public static readonly Action<ILogger, string, long, Exception?> ActionFailed =
             LoggerMessage.Define<string, long>(LogLevel.Warning, new EventId(11, nameof(ActionFailed)), "{Action} failed in {Duration}ms");
+
         public static readonly Action<ILogger, Exception?> AuthenticationFailed =
             LoggerMessage.Define(LogLevel.Warning, new EventId(12, nameof(AuthenticationFailed)), "Re-authentication failed");
+
         public static readonly Action<ILogger, Exception?> ShutdownTimeout =
             LoggerMessage.Define(LogLevel.Warning, new EventId(13, nameof(ShutdownTimeout)), "WebSocket tasks did not finish before shutdown timeout");
+
         public static readonly Action<ILogger, Exception?> ShutdownFailed =
             LoggerMessage.Define(LogLevel.Warning, new EventId(14, nameof(ShutdownFailed)), "WebSocket task failed during shutdown");
+
         public static readonly Action<ILogger, Exception?> CloseMiddlewareFailed =
             LoggerMessage.Define(LogLevel.Warning, new EventId(15, nameof(CloseMiddlewareFailed)), "WebSocket close middleware failed");
+
         public static readonly Action<ILogger, Exception?> CloseFailed =
             LoggerMessage.Define(LogLevel.Debug, new EventId(16, nameof(CloseFailed)), "WebSocket graceful close failed");
+
         public static readonly Action<ILogger, Exception?> CleanupFailed =
             LoggerMessage.Define(LogLevel.Debug, new EventId(17, nameof(CleanupFailed)), "Connection cleanup observed a completed task failure");
+
         public static readonly Action<ILogger, Exception?> DisposalFailed =
             LoggerMessage.Define(LogLevel.Warning, new EventId(18, nameof(DisposalFailed)), "Connection resource disposal failed");
     }

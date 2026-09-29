@@ -1,9 +1,11 @@
+using System.Net;
+using System.Net.WebSockets;
+using System.Text;
 using DarkWS.Test.Project;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NUnit.Framework;
-using System.Net.WebSockets;
 
 namespace DarkWS.Test;
 
@@ -57,7 +59,7 @@ public sealed class Tests {
     public async Task AuthMessageReplacesSessionAsync() {
         using var webSocket = await ConnectAsync("first");
         await webSocket.SendTextAsync("auth:second");
-        Assert.That(System.Text.Encoding.UTF8.GetString(await webSocket.ReceiveRawMessage()), Is.EqualTo("auth:success"));
+        Assert.That(Encoding.UTF8.GetString(await webSocket.ReceiveRawMessage()), Is.EqualTo("auth:success"));
         await webSocket.SendMessage(new RequestMessage("3", "test:session"));
 
         var message = await webSocket.ReceiveMessage<ResponseMessage<TestHandler.SessionResult>>();
@@ -125,7 +127,7 @@ public sealed class Tests {
         await webSocket.SendTextAsync("{");
         await webSocket.SendTextAsync("ping");
 
-        Assert.That(System.Text.Encoding.UTF8.GetString(await webSocket.ReceiveRawMessage()), Is.EqualTo("pong"));
+        Assert.That(Encoding.UTF8.GetString(await webSocket.ReceiveRawMessage()), Is.EqualTo("pong"));
     }
 
     [Test]
@@ -133,13 +135,13 @@ public sealed class Tests {
         using var webSocket = await ConnectAsync();
         await webSocket.SendTextAsync("ping");
 
-        Assert.That(System.Text.Encoding.UTF8.GetString(await webSocket.ReceiveRawMessage()), Is.EqualTo("pong"));
+        Assert.That(Encoding.UTF8.GetString(await webSocket.ReceiveRawMessage()), Is.EqualTo("pong"));
     }
 
     [Test]
     public async Task NonWebSocketRequestReturnsBadRequestAsync() {
         using var response = await Server.CreateClient().GetAsync("/ws");
-        Assert.That(response.StatusCode, Is.EqualTo(System.Net.HttpStatusCode.BadRequest));
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
     }
 
     [Test]
@@ -151,7 +153,7 @@ public sealed class Tests {
         var scopeBefore = probe.ScopeInitializationCount;
         var webSocket = await ConnectAsync("first");
         await webSocket.SendTextAsync("auth:second");
-        Assert.That(System.Text.Encoding.UTF8.GetString(await webSocket.ReceiveRawMessage()), Is.EqualTo("auth:success"));
+        Assert.That(Encoding.UTF8.GetString(await webSocket.ReceiveRawMessage()), Is.EqualTo("auth:success"));
         await webSocket.SendMessage(new RequestMessage("hook", "test:get"));
         _ = await webSocket.ReceiveMessage<ResponseMessage<string>>();
         webSocket.Abort();

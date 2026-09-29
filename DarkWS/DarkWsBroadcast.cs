@@ -8,10 +8,13 @@ public enum DarkWsTarget {
     // Numeric values are part of the Redis wire protocol and must never be reassigned.
     /// <summary>Every connection.</summary>
     All = 0,
+
     /// <summary>One connection id.</summary>
     Connection = 1,
+
     /// <summary>Connections in a session.</summary>
     Session = 2,
+
     /// <summary>Members of a broadcast group.</summary>
     Group = 3
 }
@@ -23,9 +26,11 @@ public enum DarkWsTarget {
 /// <param name="Data">Optional result or notification data.</param>
 public sealed record DarkWsBroadcast(
     [property: JsonPropertyName("target")] DarkWsTarget Target,
-    [property: JsonPropertyName("targetId")] string? TargetId,
+    [property: JsonPropertyName("targetId")]
+    string? TargetId,
     [property: JsonPropertyName("action")] string Action,
-    [property: JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(BroadcastDataConverter))] JsonElement? Data
+    [property: JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(BroadcastDataConverter))]
+    JsonElement? Data
 );
 
 // No data is omitted and JSON null reads back as a Null element, so an explicit null survives a serializing backplane.
@@ -37,7 +42,10 @@ internal sealed class BroadcastDataConverter : JsonConverter<JsonElement?> {
     }
 
     public override void Write(Utf8JsonWriter writer, JsonElement? value, JsonSerializerOptions options) {
-        if (value is { } element) element.WriteTo(writer);
-        else writer.WriteNullValue();
+        if (value is { } element) {
+            element.WriteTo(writer);
+        } else {
+            writer.WriteNullValue();
+        }
     }
 }
