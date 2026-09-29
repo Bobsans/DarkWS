@@ -12,27 +12,26 @@ public sealed class ConnectionStorage {
     /// <summary>Adds or replaces an open connection by id and refreshes its session/group indexes. A closed connection is ignored.</summary>
     public IWebSocketConnection Add(IWebSocketConnection connection) {
         ArgumentNullException.ThrowIfNull(connection);
-        lock (_sync) {
-            // A refresh racing with shutdown must not re-register a connection that was already removed.
+        while (true) {
             if (!connection.IsOpen) {
                 return connection;
             }
 
-            var entry = new Entry(connection, connection.Session?.Id, connection.Session?.Groups.Distinct(StringComparer.Ordinal).ToArray() ?? []);
-            if (_connections.Remove(connection.Id, out var previous)) {
-                RemoveIndexes(previous);
-            }
+            var session = connection.Session;
+            var entry = new Entry(connection, session?.Id, session?.Groups.Distinct(StringComparer.Ordinal).ToArray() ?? []);
+            lock (_sync) {
+                // A refresh racing with shutdown must not re-register a connection that was already removed.
+                if (!connection.IsOpen) {
+                    return connection;
+                }
+                // Re-authentication may have replaced the session while its groups were being read.
+                if (!ReferenceEquals(session, connection.Session)) {
+                    continue;
+                }
 
-            _connections.Add(connection.Id, entry);
-            if (entry.SessionId is not null) {
-                AddIndex(_sessions, entry.SessionId, connection.Id);
+                AddEntry(entry);
+                return connection;
             }
-
-            foreach (var group in entry.Groups) {
-                AddIndex(_groups, group, connection.Id);
-            }
-
-            return connection;
         }
     }
 
@@ -51,11 +50,28 @@ public sealed class ConnectionStorage {
     }
 
     internal void SetSession(WebSocketConnection connection, IDarkWsSession? session) {
+        var snapshot = new Entry(connection, session?.Id, session?.Groups.Distinct(StringComparer.Ordinal).ToArray() ?? []);
         lock (_sync) {
             connection.SetSession(session);
-            if (_connections.TryGetValue(connection.Id, out var entry) && ReferenceEquals(entry.Connection, connection)) {
-                Add(connection);
+            if (connection.IsOpen && _connections.TryGetValue(connection.Id, out var entry) && ReferenceEquals(entry.Connection, connection)) {
+                AddEntry(snapshot);
             }
+        }
+    }
+
+    private void AddEntry(Entry entry) {
+        var id = entry.Connection.Id;
+        if (_connections.Remove(id, out var previous)) {
+            RemoveIndexes(previous);
+        }
+
+        _connections.Add(id, entry);
+        if (entry.SessionId is not null) {
+            AddIndex(_sessions, entry.SessionId, id);
+        }
+
+        foreach (var group in entry.Groups) {
+            AddIndex(_groups, group, id);
         }
     }
 
