@@ -268,9 +268,14 @@ this does not promise live reconfiguration of existing connections/backplanes.
 
 `SendTimeout` defaults to 30 seconds and covers both waiting for the send lock
 and writing to the socket. `BroadcastSendTimeout` can impose a shorter deadline
-on broadcasts. A broadcast writes to all local recipients concurrently, so a slow
-socket delays its publisher by at most `BroadcastSendTimeout` (and is then aborted)
-without delaying other recipients. The publisher's cancellation token prevents
+on broadcasts. Within one broadcast, all local recipients are written concurrently;
+a slow socket is aborted after `BroadcastSendTimeout` without holding up other
+recipients of that message. The in-memory publisher awaits local delivery; Redis
+publication only awaits Redis acceptance. Each Redis subscription runs up to 16
+deliveries concurrently, so unrelated broadcasts can proceed while a slow recipient
+occupies a slot. Broadcast order on one connection is not guaranteed. Pending Redis
+messages still use the library's unbounded queue: limit publisher rate and payload
+size to avoid memory growth under sustained overload. The publisher's cancellation token prevents
 publishing but does not cancel delivery that has started, so cancelling one handler
 cannot interrupt writes to other connections. `ShutdownTimeout` is one shared deadline for pending handlers,
 close hooks, and the close handshake. Shutdown removes the connection from

@@ -16,6 +16,19 @@ disconnected from Redis are lost for that instance's clients without an error.
 Treat broadcasts as change notifications and have clients refresh state after
 `IConnectionMultiplexer.ConnectionRestored`, as after a client reconnect.
 
+Each subscription runs up to 16 broadcast deliveries concurrently. A slow
+recipient therefore does not hold up an unrelated broadcast while another
+delivery slot is available. Sends to each socket remain serialized, but broadcast
+order on a connection is not guaranteed; include a version/sequence in application
+data or refresh authoritative state when ordering matters.
+
+Only active deliveries are bounded. Pending messages remain in StackExchange.Redis's
+unbounded subscription queue; sustained publication above delivery throughput can
+still grow memory. Limit publisher rate and payload size. DarkWS does not add a new
+overflow/drop policy or durable delivery. The load regression uses 900 broadcasts
+with 32 KiB data, a 10 ms publication interval, and a stuck recipient with a 100 ms
+send deadline; it checks pending work and retained managed memory across three windows.
+
 The host owns the connection multiplexer. This package retains its 2.13.17
 minimum dependency and is also tested against StackExchange.Redis 3.2.1.
 
@@ -37,6 +50,10 @@ silently ignoring exclusions. Legacy target messages retain their previous forma
 Only one Redis subscription can be active. A repeated Subscribe call throws
 `InvalidOperationException`; call Unsubscribe before replacing it. Cancelling the
 subscription token or unsubscribing cancels the token supplied to active listeners.
+Cancelled deliveries are skipped; call Unsubscribe to remove the Redis subscription.
+Receiver tasks are tracked and the lifetime source is released after they finish.
+Unsubscribe does not wait for an uncooperative listener, and can be called from a
+listener without waiting for itself. Already-running listeners must honor cancellation.
 
 Static callers should use `DarkWsRedisServiceCollectionExtensions`. The old
 `RedisConfiguration` static wrapper is obsolete; extension-call syntax is unchanged.

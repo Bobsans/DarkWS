@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Threading.Channels;
 using DarkWS.Abstractions;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
@@ -10,11 +11,13 @@ internal sealed class RedisDarkWsBackplane(
     RedisDarkWsOptions redisOptions,
     ILogger<RedisDarkWsBackplane> logger
 ) : IDarkWsBackplane {
+    private const int ConcurrentDeliveries = 16;
     private readonly RedisChannel _channel = RedisChannel.Literal(redisOptions.Channel);
     private static readonly JsonSerializerOptions _jsonOptions = CreateJsonOptions();
     private readonly SemaphoreSlim _subscriptionLock = new(1, 1);
     private ChannelMessageQueue? _subscription;
     private CancellationTokenSource? _subscriptionCancellation;
+    private Task? _subscriptionDeliveries;
 
     public async ValueTask PublishAsync(
         DarkWsBroadcast message,
@@ -43,7 +46,8 @@ internal sealed class RedisDarkWsBackplane(
             try {
                 var subscription = await connection.GetSubscriber().SubscribeAsync(_channel);
                 var token = lifetime.Token;
-                subscription.OnMessage(message => HandleMessageAsync(message, listener, token));
+                _subscriptionDeliveries = Task.WhenAll(Enumerable.Range(0, ConcurrentDeliveries)
+                    .Select(_ => Task.Run(() => ReceiveAsync(subscription, listener, token))));
                 _subscriptionCancellation = lifetime;
                 _subscription = subscription;
             } catch {
@@ -65,11 +69,34 @@ internal sealed class RedisDarkWsBackplane(
 
             await _subscriptionCancellation!.CancelAsync();
             await _subscription.UnsubscribeAsync();
+            _ = DisposeWhenCompletedAsync(_subscriptionDeliveries!, _subscriptionCancellation);
             _subscription = null;
-            _subscriptionCancellation.Dispose();
             _subscriptionCancellation = null;
+            _subscriptionDeliveries = null;
         } finally {
             _subscriptionLock.Release();
+        }
+    }
+
+    private async Task ReceiveAsync(ChannelMessageQueue subscription, Func<DarkWsBroadcast, CancellationToken, ValueTask> listener, CancellationToken token) {
+        try {
+            while (true) {
+                // Keep draining after lifetime cancellation until unsubscribe completes the Redis queue.
+                var message = await subscription.ReadAsync();
+                await HandleMessageAsync(message, listener, token);
+            }
+        } catch (ChannelClosedException) {
+            // Unsubscribe completed and the remaining messages were drained.
+        }
+    }
+
+    private async Task DisposeWhenCompletedAsync(Task deliveries, CancellationTokenSource lifetime) {
+        try {
+            await deliveries;
+        } catch (Exception error) {
+            logger.LogWarning(error, "Redis broadcast receivers failed on {Channel}", _channel);
+        } finally {
+            lifetime.Dispose();
         }
     }
 

@@ -63,6 +63,11 @@ include migration guidance before a release is published.
 
 ### Changed
 
+- DWA-02: Redis subscriptions run up to 16 concurrent broadcast deliveries, so one
+  slow recipient no longer serializes the stream. Broadcast order on a connection
+  is not guaranteed. Receiver tasks are tracked and cancelled on unsubscribe;
+  lifetime resources are released after completion. Pending Redis queue capacity
+  is unchanged, and no new overflow/drop policy is introduced.
 - A command arriving at a full shared connection queue closes the socket with
   status 1008 (Policy Violation), instead of indefinitely blocking reads.
   `MaxConcurrentRequestsPerConnection` must leave room for four reserved command
@@ -88,6 +93,10 @@ include migration guidance before a release is published.
 
 ### Migration
 
+- Redis consumers must not rely on publication order on one connection. Include
+  application versions/sequences or refresh authoritative state when ordering
+  matters. Bound publication rate and payload size: the 16-delivery limit does not
+  impose a hard memory cap on StackExchange.Redis's pending subscription queue.
 - Avoid flooding a connection with `auth:`/`logout`: the shared FIFO now reserves
   four extra command places and closes with 1008 when a command cannot enter it.
   Ordinary requests retain their existing queue limit and `RequestQueueTimeout`.
@@ -157,8 +166,8 @@ include migration guidance before a release is published.
   provider, HTTP 401/403, and wire errors still stop retries; a provider that exceeds
   `ConnectionTimeout` is retried.
 - AUD-06: Broadcast delivery writes to all local recipients concurrently instead
-  of `Environment.ProcessorCount` at a time, so slow sockets no longer delay the
-  rest. With the in-memory backplane, the publisher's cancellation token no longer
+  of `Environment.ProcessorCount` at a time, so slow sockets no longer delay other
+  recipients of the same broadcast. With the in-memory backplane, the publisher's cancellation token no longer
   cancels writes to other connections (which aborted their sockets) or skips the
   remaining recipients; an already cancelled token still prevents publishing.
   `BroadcastAsync` still completes after local delivery, bounded by

@@ -1,10 +1,13 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Net.WebSockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DarkWS.Abstractions;
 using DarkWS.Testing;
 using System.Security.Claims;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using NUnit.Framework;
 using StackExchange.Redis;
@@ -266,6 +269,118 @@ public sealed class RedisBackplaneTests {
 
     [TestCase(false)]
     [TestCase(true)]
+    public async Task SlowRecipientDoesNotDelayUnrelatedBroadcast(bool useRedis) {
+        await using var provider = CreateProvider($"darkws-test:{Guid.NewGuid():N}",
+            options => options.BroadcastSendTimeout = TimeSpan.FromSeconds(2), useRedis);
+        var service = provider.GetRequiredService<IHostedService>();
+        await service.StartAsync(default);
+        var slow = new DeliveryRecipient("slow", true);
+        var fast = new DeliveryRecipient("fast", false);
+        var storage = provider.GetRequiredService<ConnectionStorage>();
+        storage.Add(slow);
+        storage.Add(fast);
+        var broadcaster = provider.GetRequiredService<IBroadcaster>();
+        var slowPublish = broadcaster.BroadcastToGroupAsync("slow", "first");
+        try {
+            await slow.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var timer = Stopwatch.StartNew();
+            await broadcaster.BroadcastToGroupAsync("fast", "second");
+            await fast.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            timer.Stop();
+            TestContext.Progress.WriteLine($"Redis={useRedis}: unrelated broadcast delivered in {timer.Elapsed.TotalMilliseconds:F1} ms");
+            Assert.That(timer.Elapsed, Is.LessThan(TimeSpan.FromMilliseconds(200)));
+        } finally {
+            await service.StopAsync(default);
+            await slowPublish;
+        }
+    }
+
+    [Test]
+    public async Task ConcurrentDeliveriesAreBoundedAndUnsubscribeCancelsAll() {
+        var channel = $"darkws-test:{Guid.NewGuid():N}";
+        await using var provider = CreateProvider(channel);
+        var backplane = provider.GetRequiredService<IDarkWsBackplane>();
+        var started = 0;
+        var stopped = 0;
+        var saturated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await backplane.SubscribeAsync(async (_, token) => {
+            if (Interlocked.Increment(ref started) == 16) saturated.TrySetResult();
+            try {
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            } finally {
+                if (Interlocked.Increment(ref stopped) == 16) cancelled.TrySetResult();
+            }
+        });
+        try {
+            for (var index = 0; index < 64; index++) {
+                await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "blocked", null));
+            }
+            await saturated.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await backplane.UnsubscribeAsync();
+            await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.That(Volatile.Read(ref started), Is.EqualTo(16));
+            Assert.That(Volatile.Read(ref stopped), Is.EqualTo(16));
+        } finally {
+            await backplane.UnsubscribeAsync();
+        }
+    }
+
+    [Test]
+    public async Task StuckRecipientLoadKeepsBacklogAndRetainedMemoryStable() {
+        await using var provider = CreateProvider($"darkws-test:{Guid.NewGuid():N}",
+            options => options.BroadcastSendTimeout = TimeSpan.FromMilliseconds(100));
+        var service = provider.GetRequiredService<IHostedService>();
+        await service.StartAsync(default);
+        // Deliberately keep the recipient registered after abort to sustain the slow workload.
+        var slow = new DeliveryRecipient("slow", true, stayOpenOnAbort: true);
+        provider.GetRequiredService<ConnectionStorage>().Add(slow);
+        var broadcaster = provider.GetRequiredService<IBroadcaster>();
+        var payload = new string('x', 32 * 1024);
+        var retained = new List<long>();
+        var published = 0;
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        try {
+            for (var window = 0; window < 3; window++) {
+                for (var index = 0; index < 300; index++) {
+                    await broadcaster.BroadcastToGroupAsync("slow", "load", payload, deadline.Token);
+                    published++;
+                    await Task.Delay(10, deadline.Token);
+                }
+                retained.Add(GC.GetTotalMemory(forceFullCollection: true));
+                var stats = slow.Stats;
+                TestContext.Progress.WriteLine($"Redis load: published={published}, pending={published - stats.Completed}, peak={stats.Peak}, retained={retained[^1]} bytes");
+                Assert.That(stats.Peak, Is.LessThanOrEqualTo(16));
+                Assert.That(published - stats.Completed, Is.LessThanOrEqualTo(64));
+            }
+            Assert.That(retained.Max() - retained.Min(), Is.LessThan(8L * 1024 * 1024));
+            while (slow.Stats.Completed < published) {
+                await Task.Delay(10, deadline.Token);
+            }
+        } finally {
+            await service.StopAsync(default);
+        }
+    }
+
+    [Test]
+    public async Task ListenerCanUnsubscribeWithoutWaitingForItself() {
+        await using var provider = CreateProvider($"darkws-test:{Guid.NewGuid():N}");
+        var backplane = provider.GetRequiredService<IDarkWsBackplane>();
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await backplane.SubscribeAsync(async (_, _) => {
+            await backplane.UnsubscribeAsync();
+            stopped.TrySetResult();
+        });
+        try {
+            await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "stop", null));
+            await stopped.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        } finally {
+            await backplane.UnsubscribeAsync();
+        }
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
     public async Task GroupUnionAndExclusionsAreDeliveredOnceAcrossInstances(bool excludeSession) {
         var channel = $"darkws-test:{Guid.NewGuid():N}";
         await using var first = CreateProvider(channel);
@@ -299,12 +414,14 @@ public sealed class RedisBackplaneTests {
                 : new DarkWsBroadcastExclusion { ConnectionId = sender.Id };
             var broadcaster = first.GetRequiredService<IBroadcaster>();
             await broadcaster.BroadcastToGroupsAsync<string?>(["a", "b", "a"], "updated", null, except);
-            // Each subscriber processes the barrier after the tested broadcast; no sleep-based absence assertion.
+            // Deliveries can finish out of order; wait for both the marker and the expected broadcast recipients.
             await broadcaster.BroadcastAsync("barrier");
             await barrier.Task.WaitAsync(TimeSpan.FromSeconds(10));
             DarkWsTestConnection[] connections = [sender, otherTab, otherUser, unrelated];
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            while (connections.Any(connection => !connection.SentMessages.Any(bytes => HasAction(bytes, "barrier")))) {
+            while (connections.Any(connection => !connection.SentMessages.Any(bytes => HasAction(bytes, "barrier"))) ||
+                   !otherUser.SentMessages.Any(bytes => HasAction(bytes, "updated")) ||
+                   !excludeSession && !otherTab.SentMessages.Any(bytes => HasAction(bytes, "updated"))) {
                 await Task.Delay(10, deadline.Token);
             }
             Assert.That(publications, Has.Count.EqualTo(1));
@@ -337,12 +454,58 @@ public sealed class RedisBackplaneTests {
         public ClaimsPrincipal User { get; } = new(new ClaimsIdentity([], "test"));
     }
 
-    private ServiceProvider CreateProvider(string channel, Action<DarkWsOptions>? configure = null) {
+    private sealed class DeliveryRecipient(string group, bool slow, bool stayOpenOnAbort = false) : IWebSocketConnection, IDarkWsSession {
+        private readonly object _stats = new();
+        private int _active;
+        private int _peak;
+        private int _completed;
+        public (int Active, int Peak, int Completed) Stats {
+            get { lock (_stats) { return (_active, _peak, _completed); } }
+        }
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public string Id { get; } = Guid.NewGuid().ToString("N");
+        public WebSocket WebSocket => throw new NotSupportedException();
+        public HttpContext HttpContext { get; } = new DefaultHttpContext();
+        public IDarkWsSession Session => this;
+        public ClaimsPrincipal User { get; } = new();
+        public IReadOnlyCollection<string> Groups => [group];
+        public bool IsOpen { get; private set; } = true;
+        public Task<ReceivedMessage> ReceiveMessageAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async Task SendAsync(byte[] data, CancellationToken cancellationToken = default) {
+            lock (_stats) {
+                _active++;
+                _peak = Math.Max(_peak, _active);
+            }
+            Started.TrySetResult();
+            try {
+                if (slow) {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                }
+            } finally {
+                lock (_stats) {
+                    _active--;
+                    _completed++;
+                }
+            }
+        }
+        public Task CloseAsync(CancellationToken cancellationToken = default) {
+            IsOpen = false;
+            return Task.CompletedTask;
+        }
+        public void Abort() {
+            if (!stayOpenOnAbort) IsOpen = false;
+        }
+        public void Dispose() => IsOpen = false;
+    }
+
+    private ServiceProvider CreateProvider(string channel, Action<DarkWsOptions>? configure = null, bool useRedis = true) {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(_connection);
         services.AddDarkWs(configure);
-        services.AddDarkWsRedis(channel);
+        if (useRedis) {
+            services.AddDarkWsRedis(channel);
+        }
         return services.BuildServiceProvider();
     }
 }
