@@ -5,6 +5,7 @@ using System.Text.Json;
 using DarkWS.Test.Project;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using NUnit.Framework;
 
@@ -109,7 +110,6 @@ public sealed class PublicContractTests {
     [TestCase(nameof(DarkWsOptions.AuthorizationRequiredError))]
     [TestCase(nameof(DarkWsOptions.RequestFailedError))]
     [TestCase(nameof(DarkWsOptions.BusyError))]
-    [TestCase(nameof(DarkWsOptions.AuthenticationFailedError))]
     public void InvalidStringOptionsFailValidation(string property) {
         foreach (var value in new string?[] { null, "", " " }) {
             var services = new ServiceCollection();
@@ -117,6 +117,28 @@ public sealed class PublicContractTests {
             using var provider = services.BuildServiceProvider();
             Assert.Throws<OptionsValidationException>(() => _ = provider.GetRequiredService<IOptions<DarkWsOptions>>().Value);
         }
+    }
+
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase(" ")]
+    public async Task UnusedAuthenticationFailedErrorDoesNotPreventStartup(string? value) {
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
+#pragma warning disable CS0618 // Verify configuration compatibility for the obsolete option.
+        builder.Services.AddDarkWs(options => options.AuthenticationFailedError = value!);
+#pragma warning restore CS0618
+        using var host = builder.Build();
+        await host.StartAsync();
+        await host.StopAsync();
+    }
+
+    [Test]
+    public void AuthenticationFailedErrorIsObsoleteWithAWarning() {
+        var property = typeof(DarkWsOptions).GetProperty("AuthenticationFailedError")!;
+        var obsolete = property.GetCustomAttribute<ObsoleteAttribute>();
+        Assert.That(obsolete, Is.Not.Null);
+        Assert.That(obsolete!.IsError, Is.False);
+        Assert.That(obsolete.Message, Does.Contain("auth:failed"));
     }
 
     [Test]

@@ -63,6 +63,8 @@ include migration guidance before a release is published.
 
 ### Changed
 
+- DWA-04: A repeated `AddAuthenticator` call throws `InvalidOperationException`
+  before changing service registrations, including repeated calls with the same types.
 - DWA-02: Redis subscriptions run up to 16 concurrent broadcast deliveries, so one
   slow recipient no longer serializes the stream. Broadcast order on a connection
   is not guaranteed. Receiver tasks are tracked and cancelled on unsubscribe;
@@ -91,8 +93,19 @@ include migration guidance before a release is published.
 - AUD-45: The published package list lives once, as `DarkWsPackages` in
   `Directory.Build.props`; package settings and the gate scripts read it.
 
+### Deprecated
+
+- DWA-05: `DarkWsOptions.AuthenticationFailedError` now produces an obsolete warning
+  and is excluded from options validation. It remains binary-compatible until removal
+  in the next major version; null, empty, or whitespace values no longer block startup.
+
 ### Migration
 
+- Register the authenticator and typed session once through the shared DarkWS builder;
+  remove repeated `AddAuthenticator` calls from application modules. Previously the
+  last authenticator won while earlier typed-session factories remained registered.
+- Remove `AuthenticationFailedError` assignments and configuration entries. The option
+  is unused; failed text authentication always replies `auth:failed`.
 - Redis consumers must not rely on publication order on one connection. Include
   application versions/sequences or refresh authoritative state when ordering
   matters. Bound publication rate and payload size: the 16-delivery limit does not

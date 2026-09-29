@@ -1,3 +1,4 @@
+using DarkWS.Abstractions;
 using DarkWS.Test.Project;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -6,6 +7,28 @@ using NUnit.Framework;
 namespace DarkWS.Test;
 
 public sealed class RegistrationTests {
+    [TestCase(false)]
+    [TestCase(true)]
+    public void RepeatedAuthenticatorRegistrationFailsWithoutChangingServices(bool differentTypes) {
+        var services = new ServiceCollection();
+        var builder = services.AddDarkWs().AddAuthenticator<TestAuthenticator, TestSession>();
+        var descriptors = services.ToArray();
+
+        var error = Assert.Throws<InvalidOperationException>(() => {
+            if (differentTypes) {
+                builder.AddAuthenticator<AspNetDarkWsAuthenticator, AspNetDarkWsSession>();
+            } else {
+                builder.AddAuthenticator<TestAuthenticator, TestSession>();
+            }
+        });
+
+        Assert.That(error!.Message, Does.Contain("AddAuthenticator").And.Contain("once"));
+        Assert.That(services, Is.EqualTo(descriptors));
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        Assert.That(scope.ServiceProvider.GetRequiredService<IDarkWsAuthenticator>(), Is.TypeOf<TestAuthenticator>());
+    }
+
     [Test]
     public void RepeatedRegistrationFailsWithoutChangingServicesOrActions() {
         var services = new ServiceCollection();

@@ -8,6 +8,7 @@ namespace DarkWS;
 /// <summary>Composes handlers, authentication, and message-scope services after a single AddDarkWs call.</summary>
 public sealed class DarkWsBuilder {
     private readonly DarkWsActionRegistry _registry;
+    private bool _authenticatorAdded;
 
     internal DarkWsBuilder(IServiceCollection services, DarkWsActionRegistry registry) {
         Services = services;
@@ -39,13 +40,18 @@ public sealed class DarkWsBuilder {
         return this;
     }
 
-    /// <summary>Registers the authenticator and typed session injection in message scopes. Missing or incompatible sessions throw InvalidOperationException.</summary>
+    /// <summary>Registers the authenticator and typed session injection once. Repeated calls and missing or incompatible sessions throw InvalidOperationException.</summary>
     public DarkWsBuilder AddAuthenticator<TAuthenticator, TSession>()
         where TAuthenticator : class, IDarkWsAuthenticator
         where TSession : class, IDarkWsSession {
+        if (_authenticatorAdded) {
+            throw new InvalidOperationException("AddAuthenticator must only be called once per service collection");
+        }
+
         Services.Replace(ServiceDescriptor.Scoped<IDarkWsAuthenticator, TAuthenticator>());
         Services.AddScoped(provider => provider.GetRequiredService<IDarkWsContextAccessor>().Session as TSession
             ?? throw new InvalidOperationException($"Expected session type {typeof(TSession).FullName}"));
+        _authenticatorAdded = true;
         return this;
     }
 

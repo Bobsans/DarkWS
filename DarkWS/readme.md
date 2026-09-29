@@ -100,6 +100,9 @@ positive and at most 4294967294 milliseconds.
 
 Call `AddDarkWs()` once and reuse its builder for additional handler assemblies.
 Repeated calls throw `InvalidOperationException` without replacing the registry.
+Call `AddAuthenticator<TAuthenticator, TSession>()` once on that builder. A second
+call throws `InvalidOperationException` before changing any registrations, even
+when the authenticator and session types are the same.
 Only actions declared on the scanned handler class are registered; inherited
 actions must be declared or overridden there and marked with `[Action]`.
 Attributed methods must be public instance methods returning exactly `IResponse`
@@ -178,7 +181,10 @@ During upgrade, authenticator exceptions are logged and return HTTP 401 by defau
 connection with no session. A null authenticator result continues to allow anonymous
 upgrade regardless of this option. Request/shutdown cancellation is propagated.
 JSON authentication/logout actions and `@auth` replies are no longer used.
-The legacy `AuthenticationFailedError` option does not customize text replies.
+The obsolete `AuthenticationFailedError` option is unused and no longer validated;
+empty values do not prevent startup. Remove it from configuration and code: text
+authentication always replies `auth:failed`, and the option will be removed in the
+next major version.
 Token expiry and revocation enforcement remain the application's responsibility,
 including when a failed refresh retains the previous session;
 already running actions are not rolled back.

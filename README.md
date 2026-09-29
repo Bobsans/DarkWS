@@ -125,6 +125,9 @@ The browser sends `system:ping` and receives the returned object under `data`.
 Call `AddDarkWs()` once per service collection; a second call throws
 `InvalidOperationException` before changing registrations. Reuse the returned
 builder to register additional handler assemblies.
+Call `AddAuthenticator<TAuthenticator, TSession>()` once on that builder. A second
+call throws `InvalidOperationException` before changing any registrations, even
+when the authenticator and session types are the same.
 
 The canonical static entry points are `DarkWsServiceCollectionExtensions` and
 `DarkWsEndpointRouteBuilderExtensions` (Redis uses
@@ -539,7 +542,10 @@ Session retention does not validate or extend the previous session's lifetime;
 the application must still enforce expiry and revocation.
 JSON actions `darkws:authenticate` / `darkws:logout` are no longer system commands, and
 `@auth` replies are no longer emitted. `@auth` remains a reserved legacy request id.
-The legacy `AuthenticationFailedError` option does not customize `auth:failed`.
+The obsolete `AuthenticationFailedError` option is unused and no longer validated;
+empty values do not prevent startup. Remove it from configuration and code: text
+authentication always replies `auth:failed`, and the option will be removed in the
+next major version.
 
 Clients serialize authentication and logout because text replies have no correlation
 id. A timeout (or cancellation while waiting in .NET) discards the socket so a late

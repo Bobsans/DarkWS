@@ -67,6 +67,7 @@ public sealed class DarkWsOptions {
     /// <summary>Code for a request rejected because the connection queue stayed full for RequestQueueTimeout. Default darkws:error:busy.</summary>
     public string BusyError { get; set; } = "darkws:error:busy";
 
-    /// <summary>Legacy JSON authentication error code. Text authentication always replies auth:failed.</summary>
+    /// <summary>Unused legacy JSON authentication error code, retained for binary compatibility. Scheduled for removal in the next major version.</summary>
+    [Obsolete("AuthenticationFailedError is unused. Text authentication always replies auth:failed. This option will be removed in the next major version.")]
     public string AuthenticationFailedError { get; set; } = "darkws:error:authentication-failed";
 }
