@@ -449,6 +449,14 @@ even when the last attempt was unsent; this does not confirm server execution.
 Retries may open a connection even with `reconnect: false`, but explicit `close()`
 or `dispose()` cancels them. Control commands and server error replies are not retried.
 
+`maxPendingRequests` defaults to 256 (a positive safe integer). It counts pending
+`request()`, `authenticate()`, and `logout()` calls, including connection waits
+and retry delays. One call retains one slot until it settles; retries reuse it.
+An excess call immediately returns a rejected promise with `RangeError`, adding
+no request, timer, or internal retry. Raise the option explicitly if the application
+needs more concurrency. Automatic session restoration bypasses the budget so a
+full queue can authenticate; raw `send()` calls are outside the request budget.
+
 `authenticate("")` rejects immediately with `TypeError` without connecting or
 sending anything; use `logout()` to sign out. `controlTimeout` sets an independent
 reply deadline for authentication, logout, and automatic session restoration:

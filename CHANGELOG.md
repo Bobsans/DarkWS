@@ -8,6 +8,10 @@ include migration guidance before a release is published.
 
 ### Added
 
+- DWA-07: Browser `maxPendingRequests` (default 256) bounds application requests and
+  manual authentication/logout, including connection waits and retry delays. Excess
+  calls reject immediately with `RangeError` without adding requests or timers.
+  Automatic session restoration can still run when the application budget is full.
 - DWA-06: Browser `sessionRestoreFailed(error, event)` reports rejected automatic
   authentication or a token-provider error before anonymous-ready `open`. The event
   identifies the socket and lets applications close it to stop that fallback.
@@ -115,6 +119,9 @@ include migration guidance before a release is published.
 
 ### Migration
 
+- Browser applications with more than 256 simultaneous request/control calls must
+  wait for capacity or explicitly increase `maxPendingRequests`. The value must be
+  a positive safe integer; retry attempts retain the original call's slot.
 - Register the authenticator and typed session once through the shared DarkWS builder;
   remove repeated `AddAuthenticator` calls from application modules. Previously the
   last authenticator won while earlier typed-session factories remained registered.

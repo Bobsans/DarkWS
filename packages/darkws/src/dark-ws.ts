@@ -17,6 +17,8 @@ export interface DarkWsOptions {
   beforeConnect?: () => Promise<unknown>;
   authenticationToken?: () => string | null | undefined | Promise<string | null | undefined>;
   requestTimeout?: number;
+  /** Maximum pending request/authenticate/logout calls, including waits and retries. Default 256; positive safe integer. */
+  maxPendingRequests?: number;
   /** Default options per action; explicit request options override them field by field. Not used by authenticate/logout. */
   requestOptions?: (action: string) => DarkWsRequestOptions | undefined;
   /** Reply timeout for authentication and logout, including session restore. Default 30000 ms; 0 disables it. */
@@ -133,9 +135,10 @@ export default class DarkWs {
   private readonly connectionWaiters = new Set<ConnectionWaiter>();
   private readonly retryTimers = new Map<ReturnType<typeof setTimeout>, (message: string) => void>();
   private closeGeneration = 0;
+  private pendingOperations = 0;
   private readonly options: Required<Pick<DarkWsOptions,
     "reconnect" | "reconnectTimeout" | "requestTimeout" | "controlTimeout" | "pongTimeout" |
-    "waitConnectionTimeout" | "debug">> & DarkWsOptions;
+    "waitConnectionTimeout" | "maxPendingRequests" | "debug">> & DarkWsOptions;
   private readonly pingInterval: number;
   private socket?: WebSocket;
   private reconnectAttempts = 0;
@@ -164,7 +167,11 @@ export default class DarkWs {
       debug: false,
       ...options,
       controlTimeout: options.controlTimeout ?? 30000,
+      maxPendingRequests: options.maxPendingRequests ?? 256,
     };
+    if (!Number.isSafeInteger(this.options.maxPendingRequests) || this.options.maxPendingRequests <= 0) {
+      throw new RangeError("maxPendingRequests must be a positive safe integer");
+    }
     this.pingInterval = options.pingInterval ?? options.pingTimeout ?? 30000;
     if (options.reconnectOnVisible && typeof document !== "undefined") {
       this.visibilityDocument = document;
@@ -266,7 +273,19 @@ export default class DarkWs {
     options?: number | DarkWsRequestOptions,
   ): Promise<TResult> {
     this.assertNotDisposed();
-    return this.requestWithRetry<TResult, TPayload>(action, payload, typeof options === "number" ? { timeout: options } : options ?? {});
+    return this.withRequestSlot(() => this.requestWithRetry<TResult, TPayload>(action, payload, typeof options === "number" ? { timeout: options } : options ?? {}));
+  }
+
+  private async withRequestSlot<TResult>(operation: () => Promise<TResult>): Promise<TResult> {
+    if (this.pendingOperations >= this.options.maxPendingRequests) {
+      throw new RangeError(`Pending request limit of ${this.options.maxPendingRequests} reached`);
+    }
+    this.pendingOperations++;
+    try {
+      return await operation();
+    } finally {
+      this.pendingOperations--;
+    }
   }
 
   private async requestWithRetry<TResult, TPayload>(action: string, payload: TPayload | undefined, options: DarkWsRequestOptions): Promise<TResult> {
@@ -328,11 +347,13 @@ export default class DarkWs {
 
   public authenticate(token: string): Promise<void> {
     if (token === "") return Promise.reject(new TypeError("Token must not be empty; use logout() to sign out"));
-    return this.systemRequest("auth", "auth:" + token);
+    this.assertNotDisposed();
+    return this.withRequestSlot(() => this.systemRequest("auth", "auth:" + token));
   }
 
   public logout(): Promise<void> {
-    return this.systemRequest("logout", "logout");
+    this.assertNotDisposed();
+    return this.withRequestSlot(() => this.systemRequest("logout", "logout"));
   }
 
   private systemRequest(action: string, text: string, socket?: WebSocket): Promise<void> {

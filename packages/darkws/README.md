@@ -93,6 +93,20 @@ const user = await client.request<User>("user:get", { id: "42" }, {
 });
 ```
 
+`maxPendingRequests` defaults to `256` and must be a positive safe integer.
+It bounds pending `request()`, `authenticate()`, and `logout()` calls together,
+including connection waits, command-queue waits, and every retry/jitter delay.
+Each call keeps one slot until its promise settles; retries reuse that slot.
+An excess call immediately returns a rejected promise with `RangeError`, without
+allocating a request id, invoking `requestOptions`, adding timers, or sending data.
+It is not queued or retried internally. Wait for capacity or explicitly configure
+a larger limit for workloads that need more concurrency.
+
+Automatic session restoration does not consume this budget, so a full queue can
+still authenticate its socket before sending requests. Its internal command may
+temporarily add one to `pendingRequestCount`. Raw `send()` calls do not wait for
+responses and are outside this request budget. `LazyDarkWs` uses the same limit.
+
 `timeout` is the reply deadline per attempt in milliseconds (`0` disables it),
 defaulting to `requestTimeout`. `retry.connectionClosed` and `retry.timeout` are
 independent counts of **additional** attempts for `ConnectionClosedError` and

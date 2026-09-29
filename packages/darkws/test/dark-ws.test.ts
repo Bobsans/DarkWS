@@ -92,6 +92,102 @@ describe("DarkWs", () => {
     vi.useRealTimers();
   });
 
+  describe("pending request limit", () => {
+    it("rejects request 257 immediately without adding requests, hooks, or timers", async () => {
+      const requestOptions = vi.fn(() => undefined);
+      const client = createClient({ reconnect: false, requestOptions });
+      const pending = Promise.allSettled(Array.from({ length: 256 }, () => client.request("waiting")));
+      expect(client.pendingRequestCount).toBe(256);
+      const timers = vi.getTimerCount();
+      const overflow = client.request("overflow");
+      expect(client.pendingRequestCount).toBe(256);
+      expect(vi.getTimerCount()).toBe(timers);
+      expect(requestOptions).toHaveBeenCalledTimes(256);
+      await expect(overflow).rejects.toThrow("Pending request limit of 256 reached");
+      client.dispose();
+      await pending;
+      expect(client.pendingRequestCount).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])("rejects invalid maxPendingRequests %s before allocating resources", maxPendingRequests => {
+      expect(() => createClient({ maxPendingRequests, reconnectOnVisible: true })).toThrow(RangeError);
+      expect(MockWebSocket.instances).toHaveLength(0);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("retains its slot between retry attempts and releases it after success", async () => {
+      vi.spyOn(Math, "random").mockReturnValue(0.5);
+      const client = createClient({ maxPendingRequests: 1 }).connect();
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      const result = client.request<number>("read", undefined, { timeout: 10, retry: { timeout: 1, jitter: 100 } });
+      await vi.advanceTimersByTimeAsync(0);
+      // The response timer has fired, but the retry continuation has not run yet.
+      vi.advanceTimersByTime(10);
+      await expect(client.request("between-attempts")).rejects.toBeInstanceOf(RangeError);
+      const timers = vi.getTimerCount();
+      await expect(client.request("during-jitter")).rejects.toBeInstanceOf(RangeError);
+      expect(vi.getTimerCount()).toBe(timers);
+      await vi.advanceTimersByTimeAsync(50);
+      const retried = JSON.parse(socket.sent[1] as string);
+      socket.serverMessage({ id: retried.id, data: 42 });
+      await expect(result).resolves.toBe(42);
+      const next = client.request<number>("next");
+      await vi.advanceTimersByTimeAsync(0);
+      socket.serverMessage({ id: JSON.parse(socket.sent[2] as string).id, data: 7 });
+      await expect(next).resolves.toBe(7);
+      client.dispose();
+    });
+
+    it("shares capacity with manual controls but allows automatic authentication when full", async () => {
+      const client = createClient({ maxPendingRequests: 1, authenticationToken: () => "valid" });
+      const request = client.request<number>("private");
+      const socket = MockWebSocket.instances[0];
+      const timers = vi.getTimerCount();
+      await expect(client.authenticate("manual")).rejects.toBeInstanceOf(RangeError);
+      await expect(client.logout()).rejects.toBeInstanceOf(RangeError);
+      expect(vi.getTimerCount()).toBe(timers);
+      socket.open();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(socket.sent).toEqual(["auth:valid"]);
+      socket.serverText("auth:success");
+      await vi.advanceTimersByTimeAsync(0);
+      socket.serverMessage({ id: JSON.parse(socket.sent[1] as string).id, data: 42 });
+      await expect(request).resolves.toBe(42);
+      const authentication = client.authenticate("manual");
+      await expect(client.request("overflow")).rejects.toBeInstanceOf(RangeError);
+      await expect(client.logout()).rejects.toBeInstanceOf(RangeError);
+      await vi.advanceTimersByTimeAsync(0);
+      socket.serverText("auth:failed");
+      await expect(authentication).rejects.toMatchObject({ message: "auth:failed" });
+      const logout = client.logout();
+      await vi.advanceTimersByTimeAsync(0);
+      socket.serverText("logout:success");
+      await logout;
+      client.dispose();
+    });
+
+    it("releases capacity after invalid options, a timeout, and an explicit close", async () => {
+      const client = createClient({ maxPendingRequests: 1, reconnect: false });
+      await expect(client.request("invalid", undefined, { retry: { timeout: -1 } })).rejects.toBeInstanceOf(RangeError);
+      const timedOut = expect(client.request("waiting")).rejects.toBeInstanceOf(ConnectionClosedError);
+      await vi.advanceTimersByTimeAsync(30000);
+      await timedOut;
+      const closed = expect(client.request("closed")).rejects.toBeInstanceOf(ConnectionClosedError);
+      client.close();
+      await closed;
+      client.connect();
+      const socket = MockWebSocket.instances.at(-1)!;
+      socket.open();
+      const next = client.request<number>("next");
+      await vi.advanceTimersByTimeAsync(0);
+      socket.serverMessage({ id: JSON.parse(socket.sent[0] as string).id, data: 1 });
+      await expect(next).resolves.toBe(1);
+      client.dispose();
+    });
+  });
+
   it("starts ping only while a connection is open", () => {
     const client = createClient({ reconnect: false });
     expect(vi.getTimerCount()).toBe(0);
