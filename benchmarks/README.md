@@ -21,3 +21,4 @@ Release runs on the same machine/runtime and keep their CSV output with the
 review. These are microbenchmarks, not latency guarantees or CI pass thresholds.
 
 The first local Release run is preserved in [results/2026-09-14.csv](results/2026-09-14.csv).
+The 5.0.0 run published on the documentation site is [results/2026-09-29.csv](results/2026-09-29.csv).

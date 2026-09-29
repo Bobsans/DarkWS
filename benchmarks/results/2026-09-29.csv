@@ -1,0 +1,13 @@
+# Local Release run of 5.0.0 before release; .NET 10.0.12; AMD Ryzen 7 3700X; Windows 11; samples=5; iterations=20; payload_bytes=364
+# Observational baseline only; compare on the same machine/runtime, never as a CI threshold.
+scenario,recipients,median_ms_per_operation,median_allocated_bytes_per_operation
+serialize-per-recipient,100,0.2656,39220
+serialize-once,100,0.0041,1204
+in-memory-fanout,100,0.0208,3516
+serialize-per-recipient,1000,2.9006,384820
+serialize-once,1000,0.0091,1204
+in-memory-fanout,1000,0.1426,11799
+serialize-per-recipient,10000,6.0399,3840820
+serialize-once,10000,0.0211,1204
+in-memory-fanout,10000,2.2024,102240
+parse-1000-requests,1,4.4384,984027

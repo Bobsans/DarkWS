@@ -392,7 +392,7 @@ Ping отправляется только на открытом сокете ч
 
 ## 16. Основания решений
 
-- [Текущий протокол и браузерный API](../README.md#protocol).
+- [Текущий протокол и браузерный API](../website/docs/protocol.md).
 - [Браузерная реализация](../packages/darkws/src/dark-ws.ts).
 - [Ограничения параллельных операций ClientWebSocket](https://learn.microsoft.com/en-us/dotnet/api/system.net.websockets.clientwebsocket?view=net-10.0).
 - [Рекомендации Microsoft по DI: lifetime, освобождение, thread safety](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/guidelines).

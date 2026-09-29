@@ -1,0 +1,20 @@
+{
+  "sidebar.defaultSidebar.category.Server": {
+    "message": "Сервер"
+  },
+  "sidebar.defaultSidebar.category.Clients": {
+    "message": "Клиенты"
+  },
+  "sidebar.defaultSidebar.category.Guides": {
+    "message": "Руководства"
+  },
+  "sidebar.defaultSidebar.category.API reference": {
+    "message": "Справочник API"
+  },
+  "sidebar.defaultSidebar.category.classes": {
+    "message": "Классы"
+  },
+  "sidebar.defaultSidebar.category.interfaces": {
+    "message": "Интерфейсы"
+  }
+}

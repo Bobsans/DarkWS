@@ -1,51 +1,43 @@
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/Bobsans/DarkWS/main/assets/icon.png" alt="DarkWS logo" width="96">
+
 # DarkWS.Testing
 
-Test DarkWS handlers without an HTTP server, WebSocket, Redis, or test-framework dependency.
-Targets .NET 8, 9, and 10. Reference this package from your test project.
+[![NuGet](https://img.shields.io/nuget/v/DarkWS.Testing.svg?label=NuGet)](https://www.nuget.org/packages/DarkWS.Testing)
+[![CI](https://github.com/Bobsans/DarkWS/actions/workflows/ci.yml/badge.svg)](https://github.com/Bobsans/DarkWS/actions/workflows/ci.yml)
+[![.NET](https://img.shields.io/badge/.NET-8%20%7C%209%20%7C%2010-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
+[![Docs](https://img.shields.io/badge/docs-bobsans.github.io%2FDarkWS-blue)](https://bobsans.github.io/DarkWS/server/testing)
+[![License](https://img.shields.io/github/license/Bobsans/DarkWS)](https://github.com/Bobsans/DarkWS/blob/main/LICENSE)
 
-```csharp
-await using var host = new DarkWsTestHost(builder => {
-    builder.AddHandlersFromAssemblyContaining<MyHandler>();
-    builder.Services.AddScoped<IMyService, FakeMyService>();
-});
-var connection = host.CreateConnection(); // Anonymous; supply IDarkWsSession for authenticated actions.
-await host.InvokeAsync(connection, "my:echo", JsonSerializer.SerializeToElement("hello"), requestId: "1");
-using var response = JsonDocument.Parse(connection.SentMessages.Single());
-Assert.That(response.RootElement.GetProperty("data").GetString(), Is.EqualTo("hello"));
+</div>
+
+Test [DarkWS](https://www.nuget.org/packages/DarkWS) handlers through the real server
+pipeline (authorization, binding, filters, broadcasts) without an HTTP server, a
+WebSocket, or Redis. Works with any test framework.
+
+```bash
+dotnet add package DarkWS.Testing
 ```
 
-Use `DarkWS.Testing`, `System.Text.Json`, and `Microsoft.Extensions.DependencyInjection` imports.
-The assertion above uses NUnit; the helpers work with any test framework.
-Registration, authenticated/anonymous authorization, configured JSON binding, scope initializers,
-action filters, error mapping, serialization, and async scope disposal use the server implementation.
-An authenticated session needs a principal whose `Identity.IsAuthenticated` is true.
-Each invocation creates a fresh message scope; response serialization finishes before its disposal.
-
-`host.Broadcasts` captures every published broadcast with its target and JSON data.
-The real broadcaster routes broadcasts to fake recipients created by this host;
-their `SentMessages` contain both responses and broadcast envelopes (`id = "@"`).
-Create multiple connections with session/group memberships to verify targeted delivery.
-Captured byte arrays are copies of send buffers. Treat returned arrays as read-only.
-
-For direct unit tests, initialize an existing handler without the dispatcher:
-
 ```csharp
-await using var scope = host.CreateScope(connection);
-var handler = new MyHandler(new FakeMyService());
-scope.Initialize(handler);
-var result = handler.Echo("hello");
-await result.WriteResultAsync(new ResponseContext(connection, "direct", new DarkWsOptions()));
+using System.Text.Json;
+using DarkWS.Testing;
+
+await using var host = new DarkWsTestHost(builder =>
+    builder.AddHandlersFromAssemblyContaining<MathHandler>());
+var connection = host.CreateConnection(); // pass an IDarkWsSession for authenticated calls
+
+await host.InvokeAsync(connection, "math:sum",
+    JsonSerializer.SerializeToElement(new { left = 2, right = 3 }), requestId: "1");
+
+using var response = JsonDocument.Parse(connection.SentMessages.Last());
+Assert.That(response.RootElement.GetProperty("data").GetInt32(), Is.EqualTo(5));
+Assert.That(host.Broadcasts, Is.Not.Empty);
 ```
 
-`scope.Services` also resolves constructor dependencies and registered handlers.
-Direct initialization sets connection, session, cancellation, services, and broadcaster context;
-it deliberately skips action registration, authorization, scope initializers, and filters.
-The action metadata is null. Use `InvokeAsync` when these pipeline checks matter.
-Keep the scope alive until the result has been inspected or written.
+## Documentation
 
-The host owns its service provider and connections and always substitutes an isolated in-memory
-backplane, even if application configuration registers Redis. Hosted services, HTTP middleware,
-authentication exchanges, connection lifecycle hooks, transport queues/timeouts, and frame limits
-are not run. Cover those with real WebSocket integration tests.
-Connection sessions are fixed at creation. Configure recipients before invoking concurrent actions,
-await all invocations and dispose manual scopes before disposing the host.
+- [Testing handlers](https://bobsans.github.io/DarkWS/server/testing): sessions,
+  broadcasts, direct handler tests, limits of the test host
+- [Документация на русском](https://bobsans.github.io/DarkWS/ru/server/testing)

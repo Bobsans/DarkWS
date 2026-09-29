@@ -1,237 +1,59 @@
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/Bobsans/DarkWS/main/assets/icon.png" alt="DarkWS logo" width="96">
+
 # DarkWS
 
-ASP.NET Core WebSocket request/response library with typed sessions and an
-in-memory broadcast backplane.
+[![NuGet](https://img.shields.io/nuget/v/DarkWS.svg?label=NuGet)](https://www.nuget.org/packages/DarkWS)
+[![CI](https://github.com/Bobsans/DarkWS/actions/workflows/ci.yml/badge.svg)](https://github.com/Bobsans/DarkWS/actions/workflows/ci.yml)
+[![.NET](https://img.shields.io/badge/.NET-8%20%7C%209%20%7C%2010-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
+[![Docs](https://img.shields.io/badge/docs-bobsans.github.io%2FDarkWS-blue)](https://bobsans.github.io/DarkWS/)
+[![License](https://img.shields.io/github/license/Bobsans/DarkWS)](https://github.com/Bobsans/DarkWS/blob/main/LICENSE)
 
-`PublishAsync(BroadcastTarget.Groups(groups).ExceptConnection(Connection.Id), action, data)`
-publishes once to a group union and excludes the calling connection. Use
-`ExceptSession` to exclude all connections in a session, or chain both. `Group`,
-`Session`, `Connection`, and `All` targets and a no-data overload are also available
-on `IBroadcaster` and `HandlerBase`; only group targets take exclusions.
-Overlapping groups receive one notification per connection. Empty groups publish
-nothing; null collections and blank group names/exclusion ids are invalid.
-Upgrade all Redis-connected nodes before using the new Groups=4 envelope; old nodes
-skip these messages. Existing single-target broadcasts keep their wire format.
+</div>
+
+Typed request/response and real-time broadcasts over WebSockets for ASP.NET Core.
+
+```bash
+dotnet add package DarkWS
+```
 
 ```csharp
+using DarkWS;
+using Microsoft.AspNetCore.Authorization;
+
 builder.Services
     .AddDarkWs()
-    .AddHandlersFromAssemblyContaining<Program>()
-    .AddAuthenticator<AppAuthenticator, AppSession>();
+    .AddHandlersFromAssemblyContaining<Program>();
 
 app.UseWebSockets(new WebSocketOptions { AllowedOrigins = { "https://app.example.com" } });
 app.MapDarkWs("/ws");
-```
 
-CORS does not apply to WebSockets: with cookie authentication, restrict
-`WebSocketOptions.AllowedOrigins` so another site cannot open a socket that carries
-the user's cookie. Other origins receive 403 before DarkWS runs; an empty list
-allows every origin.
-
-```csharp
-public sealed record AppSession(
-    string Id,
-    ClaimsPrincipal User,
-    Guid AccountId
-) : IDarkWsSession {
-    public IReadOnlyCollection<string> Groups => [$"account:{AccountId}"];
-}
-
-[Handler("message")]
-public sealed class MessageHandler : HandlerBase<AppSession> {
-    [Action("send")]
-    public async Task<IResponse> SendAsync(MessageInput input) {
-        await PublishAsync(BroadcastTarget.Group($"account:{Session.AccountId}"), "message:created", input);
-        return Ok();
+[Handler("math"), AllowAnonymous]
+public sealed class MathHandler : HandlerBase {
+    [Action("sum")]
+    public async Task<IResponse> SumAsync(SumInput input) {
+        var result = input.Left + input.Right;
+        await PublishAsync(BroadcastTarget.All, "math:summed", result);
+        return Ok(result);
     }
 }
+
+public sealed record SumInput(int Left, int Right);
 ```
 
-Handlers require an authenticated session by default. Add `[AllowAnonymous]`
-to public handlers or actions. Register `AddSession` and call `UseSession`
-before `MapDarkWs` when handlers need ASP.NET `ISession`. Concurrent actions of
-one connection share its `HttpContext`, `Items`, and `ISession`, which are not
-thread-safe: do not modify them concurrently.
+Clients call `math:sum` with `{ "left": 2, "right": 3 }` and receive `5`. Actions
+require an authenticated session unless marked `[AllowAnonymous]`.
 
-## Incoming message limit
+## Documentation
 
-`DarkWsOptions.MaxMessageSizeBytes` limits a complete incoming message in bytes,
-including all fragments, before JSON parsing. The default is 1 MiB (1048576 bytes);
-values must be positive. Messages exactly at the limit are accepted. Exceeding
-the limit closes the connection with status 1009 (Message Too Big), without
-dispatching the partial message. This also applies to authentication messages.
+- [Getting started](https://bobsans.github.io/DarkWS/getting-started)
+- [Handlers and actions](https://bobsans.github.io/DarkWS/server/handlers)
+- [Authentication and sessions](https://bobsans.github.io/DarkWS/server/authentication)
+- [Broadcasts](https://bobsans.github.io/DarkWS/server/broadcasts)
+- [Configuration and limits](https://bobsans.github.io/DarkWS/server/configuration)
+- [Upgrading to 5.0](https://bobsans.github.io/DarkWS/upgrading)
+- [Документация на русском](https://bobsans.github.io/DarkWS/ru/)
 
-```csharp
-services.AddDarkWs(options => options.MaxMessageSizeBytes = 256 * 1024);
-```
-
-## Request concurrency and liveness
-
-`MaxConcurrentRequestsPerConnection` defaults to 16 and must be between 1 and
-`int.MaxValue - 4`. Up to that many requests run and as many ordinary requests wait
-in FIFO order. The shared queue has four additional places reserved for
-`auth:`/`logout`, so a queued command does not stop reading `ping` or transport
-PONGs. Commands keep their order relative to requests; if one arrives at a full
-shared queue, the connection closes with status 1008 (Policy Violation).
-Ordinary requests can pause reads while waiting for a request place or shared
-queue space. After `RequestQueueTimeout` (5 seconds) they receive `BusyError`
-(`darkws:error:busy`), and reading continues. Keep that timeout below
-`KeepAliveTimeout` and client pong timeouts. Responses can arrive out of order and
-use `id` for correlation.
-The host or reverse proxy must enforce total connection and per-user/IP limits.
-
-Set `RunActionsOnThreadPool = true` (default `false`) to prevent synchronous
-handlers, including code before the first `await`, from blocking dispatch of
-later requests and `auth:`/`logout`. Scheduled actions still consume request slots;
-queue backpressure and command ordering are unchanged. Each action captures its
-DarkWS session before scheduling, but handlers may execute out of order.
-Shared `HttpContext` and `ISession` remain unsafe for concurrent mutation.
-
-`KeepAliveInterval` defaults to 30 seconds. On .NET 9/10, `KeepAliveTimeout`
-(30 seconds) enables transport PING/PONG failure detection. On .NET 8,
-`ReceiveIdleTimeout` (2 minutes) aborts a connection when a pending socket read
-times out. Each received fragment resets this timer; it is inactive while a full
-request queue pauses reads. Idle clients must send application traffic such as
-text `ping`; the browser client does so every 30 seconds by default. Transport
-PONGs do not reset the application receive timer. All timeout options must be
-positive and at most 4294967294 milliseconds.
-
-## Registration contract
-
-Call `AddDarkWs()` once and reuse its builder for additional handler assemblies.
-Repeated calls throw `InvalidOperationException` without replacing the registry.
-Call `AddAuthenticator<TAuthenticator, TSession>()` once on that builder. A second
-call throws `InvalidOperationException` before changing any registrations, even
-when the authenticator and session types are the same.
-Only actions declared on the scanned handler class are registered; inherited
-actions must be declared or overridden there and marked with `[Action]`.
-Attributed methods must be public instance methods returning exactly `IResponse`
-or `Task<IResponse>` with zero or one payload parameter. Unsupported signatures
-(including generic methods and by-reference/byref-like/pointer payloads) throw
-`InvalidOperationException` naming the type, method, and reason during registration.
-
-## Options, payloads, and context
-
-The standard `Configure`, configuration binding, and `PostConfigure` pipeline is
-supported. Final options are validated on resolution and host startup with
-`OptionsValidationException`. Existing connections and singleton services retain
-their captured settings. Non-nullable parameters require a non-null payload by
-default; nullable parameters permit omitted/null values. Set `AllowNullPayloads = true`
-to ignore reference parameter nullability annotations and let handlers receive null,
-including when `data` is omitted. It does not allow CLR null for non-nullable value
-types or disable JSON type/range validation. Invalid payloads return
-`darkws:error:invalid-request` before constructing or invoking the handler.
-
-An injected `IDarkWsContextAccessor` is initialized only inside a message scope.
-Other scopes receive `InvalidOperationException` on property access. Connection
-hooks (`DarkWsConnectionHooks`, registered with `AddConnectionHooks<T>()`) should use
-the context supplied to them.
-
-## Action filters and metadata
-
-Register global filters with `AddActionFilter<TFilter>()`. They are scoped per
-message and run in registration order, with the first filter outermost. A filter
-may return an `IResponse` without calling `next`, or inspect the response or
-exception from `next`. Call `next` at most once.
-
-```csharp
-services.AddDarkWs()
-    .AddHandlersFromAssemblyContaining<MessageHandler>()
-    .AddActionFilter<AppActionFilter>();
-```
-
-Action filters run after action lookup, authorization, payload binding, and scope
-initializers. `DarkWsActionContext` exposes the registered action name, handler
-type, method, method `Attributes`, and handler-class `HandlerAttributes` through
-`Action`, plus the client `RequestId`, the deserialized `Payload` and the received
-`RawPayload`, captured `Session`, message `Services`, and `CancellationToken`.
-`IDarkWsContextAccessor.Action` exposes the same metadata to scope initializers and
-scoped services; it is null in connection lifecycle hooks. `HandlerBase.Services` is
-the current message scope's service provider.
-
-For metrics and tracing, register request filters with `AddRequestFilter<TFilter>()`.
-They wrap every well-formed request in its message scope, outermost first, and also
-see requests rejected before any action filter runs: unknown actions (`Action` is
-null), missing authorization, and invalid payloads arrive as an `ErrorResponse`
-whose `Error` is the configured code; a failing scope initializer, action filter, or
-handler arrives as the exception, which DarkWS answers with `RequestFailedError`
-(or the `DarkWsException` response) after the filters. `DarkWsRequestContext`
-carries `RequestId`, the client's `ActionName`, `RawPayload`, `Session`, `Services`,
-and `CancellationToken`. Malformed JSON and busy rejections are answered before a
-message scope exists and do not reach any filter.
-
-## Response handling
-
-Results are serialized before the message scope is disposed, so deferred data over
-a scoped service is still readable. A `null` result, a result that cannot be
-serialized, or a custom `IResponse` that fails before sending is answered with
-`darkws:error:request-failed` and logged; the connection stays open.
-
-## Shutdown and authentication
-
-`SendTimeout` defaults to 30 seconds and includes send-lock wait and transport
-write. Expiration aborts the socket. `ShutdownTimeout` bounds the whole shutdown:
-pending tasks, close hooks, and handshake. Connections leave storage immediately;
-handler tokens are cancelled. Handlers must cooperate with cancellation. Tasks
-that ignore it retain their scope/connection resources until actual completion,
-while the socket is aborted and further responses are suppressed. In
-`OnCloseAsync`, `ConnectionAborted` is the shutdown deadline, not the cancelled
-handler token.
-
-System commands are plain text: `auth:<token>` receives `auth:success` or
-`auth:failed`; `logout` receives `logout:success`; `ping` receives `pong`.
-Rejected authentication clears the previous session by default.
-`KeepSessionOnFailedAuthentication = true` retains the session, HTTP principal, and
-membership indexes after a rejected/empty token or authenticator exception, while
-still replying `auth:failed`. No `OnAuthenticatedAsync` hook runs for an unchanged
-session. Successful authentication replaces the session; explicit logout always
-clears it. Both notify `OnAuthenticatedAsync`, as does rejection with the default
-setting, and the hook's current session can be null.
-
-During upgrade, authenticator exceptions are logged and return HTTP 401 by default.
-`AcceptAnonymousOnUpgradeAuthenticationException = true` instead accepts an anonymous
-connection with no session. A null authenticator result continues to allow anonymous
-upgrade regardless of this option. Request/shutdown cancellation is propagated.
-JSON authentication/logout actions and `@auth` replies are no longer used; text
-authentication always replies `auth:failed`.
-Token expiry and revocation enforcement remain the application's responsibility,
-including when a failed refresh retains the previous session;
-already running actions are not rolled back.
-
-Session and group indexes refresh on registration and re-authentication. Call
-`IDarkWsConnections.Refresh(connection)` after external group changes; closed and
-unregistered connections are ignored, so a refresh racing with disconnect cannot
-re-register them.
-XML API documentation and `.snupkg` symbols with embedded sources are included.
-
-## Compatibility and diagnostics
-
-See the repository CHANGELOG before upgrading from 2.0.0: 2.1.0 introduced the
-1 MiB default limit and closes oversized input with status 1009. Configure
-`MaxMessageSizeBytes` explicitly if your application legitimately needs more.
-
-Request ids `@` and `@auth` are reserved. Invalid requests using them receive
-`invalid-request` with an empty id, so errors cannot be mistaken for broadcasts.
-Empty response error codes are rejected at construction. Domain exceptions retain
-their code in `Message` and support an optional inner exception. Public object
-boundaries report null arguments with `ArgumentNullException`.
-
-Successful actions and malformed requests use Debug logs; unexpected failures
-remain warnings. Static callers should use `DarkWsServiceCollectionExtensions`
-and `DarkWsEndpointRouteBuilderExtensions`. The old `Configuration` wrapper is
-obsolete; extension-call syntax remains unchanged.
-
-Native AOT and trimmed publishing are unsupported because handler discovery,
-delegate compilation, and JSON serialization depend on reflection/runtime code
-generation. Use ordinary JIT publishing. The .NET 8/9/10 targets are intentional:
-their liveness mechanisms differ.
-
-Only `[AllowAnonymous]` is supported for built-in action authorization.
-`[Authorize]` and other `IAuthorizeData` on handlers/actions fail registration;
-implement domain role/policy checks in handlers or action filters and return
-controlled errors on denial.
-
-Query-string tokens can be recorded by proxies and access logs. Use short-lived
-tickets or, where the host/authenticator permits an anonymous upgrade, authenticate
-after connecting instead of putting credentials in the URL. Use WSS, redact
-credential logging, and enforce token lifetime/revocation in the application.
+Related packages: `DarkWS.Redis` (multi-instance backplane), `DarkWS.Testing`
+(handler tests), `DarkWS.Client` (.NET client), and `darkws` on npm (browser client).

@@ -1,715 +1,158 @@
-<div align="center">
-
-<img src="assets/icon.svg" alt="DarkWS logo" width="128">
+<img src="assets/icon.svg" alt="DarkWS" width="128" align="right">
 
 # DarkWS
 
 [![CI](https://github.com/Bobsans/DarkWS/actions/workflows/ci.yml/badge.svg)](https://github.com/Bobsans/DarkWS/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-90%25%2B-brightgreen)](scripts/test-coverage.ps1)
+[![Coverage](https://img.shields.io/badge/coverage-94%25%2B-brightgreen)](https://bobsans.github.io/DarkWS/performance)
 [![.NET](https://img.shields.io/badge/.NET-8%20%7C%209%20%7C%2010-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
 [![NuGet](https://img.shields.io/nuget/v/DarkWS.svg?label=NuGet)](https://www.nuget.org/packages/DarkWS)
 [![NuGet Redis](https://img.shields.io/nuget/v/DarkWS.Redis.svg?label=NuGet%20Redis)](https://www.nuget.org/packages/DarkWS.Redis)
 [![npm](https://img.shields.io/npm/v/darkws.svg?label=npm)](https://www.npmjs.com/package/darkws)
+[![Docs](https://img.shields.io/badge/docs-bobsans.github.io%2FDarkWS-blue)](https://bobsans.github.io/DarkWS/)
 [![License](https://img.shields.io/github/license/Bobsans/DarkWS)](LICENSE)
 
-</div>
+**Typed request/response and real-time broadcasts over WebSockets for ASP.NET Core
+and the browser.**
 
-DarkWS is a small request/response protocol over WebSockets for ASP.NET Core
-and browsers. It provides typed handlers, per-message dependency injection
-scopes, authenticated sessions, targeted broadcasts, and an optional Redis
-backplane.
+Write a handler, call it from the browser, await the result. Push updates to one
+user, a group, or everyone, on one server or a cluster. No hubs, no negotiation
+endpoint, no code generation: plain JSON over one socket.
 
-## Packages
+**[Documentation](https://bobsans.github.io/DarkWS/)** ·
+**[Документация на русском](https://bobsans.github.io/DarkWS/ru/)** ·
+[Getting started](https://bobsans.github.io/DarkWS/getting-started) ·
+[Build a chat](https://bobsans.github.io/DarkWS/guides/chat)
 
-| Package | Purpose |
-| --- | --- |
-| [`DarkWS`](DarkWS/) | ASP.NET Core server with an in-memory backplane |
-| [`DarkWS.Redis`](DarkWS.Redis/) | Redis backplane for multi-instance deployments |
-| [`DarkWS.Client`](DarkWS.Client/) | Async .NET client with typed requests and broadcasts |
-| [`DarkWS.Client.DependencyInjection`](DarkWS.Client.DependencyInjection/) | Optional Microsoft DI registration of `IDarkWsClient` |
-| [`DarkWS.Testing`](DarkWS.Testing/) | Handler unit tests and registered action tests without sockets |
-| [`darkws`](packages/darkws/) | Dependency-free ESM browser client with TypeScript declarations |
-
-The .NET packages target .NET 8, 9, and 10. The browser package targets modern
-browsers with native `WebSocket` and `crypto.randomUUID()` support.
-
-Native AOT and trimmed publishing (`PublishAot` / `PublishTrimmed`) are not
-supported: handler discovery, compiled expression delegates, and JSON serialization
-use reflection/runtime code generation. Use ordinary JIT publishing.
-The three target frameworks are intentional: .NET 8 uses application receive-idle
-detection, while .NET 9/10 use transport PING/PONG timeouts.
-
-## Features
-
-- Request/response correlation over one WebSocket connection.
-- Attribute-based sync and async handlers.
-- A new async DI scope for every request.
-- Typed application sessions plus optional ASP.NET `ISession` access.
-- Authentication on connect and re-authentication without reconnecting.
-- Broadcasts to all clients, one connection, one session, or a group union with exclusions.
-- In-memory single-instance operation with no extra dependency.
-- Optional Redis fan-out for multi-instance deployments.
-- Serialized socket writes, bounded sends, graceful shutdown, and reconnects.
-- Stable error types and configurable timeouts.
-
-## Installation
+## In 30 seconds
 
 Server:
 
-```bash
-dotnet add package DarkWS
-```
-
-Optional Redis backplane:
-
-```bash
-dotnet add package DarkWS.Redis
-```
-
-Browser client:
-
-```bash
-npm install darkws
-```
-
-## ASP.NET Core quick start
-
-Register DarkWS and the assembly containing handlers:
-
 ```csharp
-using DarkWS;
-
-builder.Services
-    .AddDarkWs()
-    .AddHandlersFromAssemblyContaining<Program>();
-
-var app = builder.Build();
-
-app.UseAuthentication();
-app.UseAuthorization();
+builder.Services.AddDarkWs().AddHandlersFromAssemblyContaining<Program>();
 app.UseWebSockets(new WebSocketOptions { AllowedOrigins = { "https://app.example.com" } });
 app.MapDarkWs("/ws");
-```
 
-Authenticated ASP.NET users automatically receive a basic DarkWS session.
-Handlers require authentication by default. Mark a handler or action with
-`[AllowAnonymous]` when it must be public. This default authenticator trusts only
-the HTTP identity and does not validate `auth:<token>` values: while the user is
-authenticated, any token succeeds with the same identity. Register your own
-`IDarkWsAuthenticator` to validate tokens. `HttpContext.User` always matches the
-authenticator's decision, so a rejected upgrade leaves it anonymous.
-
-CORS does not apply to WebSockets. With cookie authentication, a page on another
-site can open a socket that carries the user's cookie and becomes a DarkWS session
-(cross-site WebSocket hijacking). `WebSocketOptions.AllowedOrigins` rejects
-upgrades from other origins with 403 before DarkWS authenticates them; requests
-without an `Origin` header (non-browser clients) are still accepted. An empty list,
-the `UseWebSockets()` default, allows every origin. When other WebSocket endpoints
-need different origins, set `DarkWsOptions.AllowedOrigins` instead: the DarkWS
-endpoint then rejects other origins with 403 before running the authenticator,
-under the same rules.
-
-DarkWS action authorization supports only this authenticated/anonymous distinction.
-`[Authorize]`, role/policy attributes, and other `IAuthorizeData` on a handler or
-action fail registration with `InvalidOperationException`; they are not silently
-ignored. Enforce domain permissions inside actions, using `ErrorResponseException`
-for controlled denials. HTTP endpoint authorization applies to the upgrade request
-and does not implement per-action policies.
-
-```csharp
-using DarkWS;
-using Microsoft.AspNetCore.Authorization;
-
-[Handler("system"), AllowAnonymous]
-public sealed class SystemHandler : HandlerBase {
-    [Action("ping")]
-    public IResponse Ping() => Ok(new { ServerTime = DateTimeOffset.UtcNow });
-}
-```
-
-The browser sends `system:ping` and receives the returned object under `data`.
-
-Call `AddDarkWs()` once per service collection; a second call throws
-`InvalidOperationException` before changing registrations. Reuse the returned
-builder to register additional handler assemblies.
-Call `AddAuthenticator<TAuthenticator, TSession>()` once on that builder. A second
-call throws `InvalidOperationException` before changing any registrations, even
-when the authenticator and session types are the same.
-
-The canonical static entry points are `DarkWsServiceCollectionExtensions` and
-`DarkWsEndpointRouteBuilderExtensions` (Redis adds `DarkWsRedisBuilderExtensions`).
-
-Actions must be public instance methods declared on the scanned handler class,
-return exactly `IResponse` or `Task<IResponse>`, and accept zero or one payload
-parameter. Generic methods, by-reference/byref-like/pointer payloads, and other
-signatures marked with `[Action]` fail registration with the type, method, and
-reason. Inherited methods are not scanned; declare or override actions on the
-concrete handler and mark them with `[Action]`. Handler and action names must be
-non-empty and have no surrounding whitespace.
-
-## Connection limits and liveness
-
-```csharp
-builder.Services.AddDarkWs(options => {
-    options.MaxConcurrentRequestsPerConnection = 16;
-    options.RequestQueueTimeout = TimeSpan.FromSeconds(5);
-    options.KeepAliveInterval = TimeSpan.FromSeconds(30);
-    options.KeepAliveTimeout = TimeSpan.FromSeconds(30); // .NET 9 and later
-    options.ReceiveIdleTimeout = TimeSpan.FromMinutes(2); // .NET 8
-});
-```
-
-These are the defaults. The request limit must be between 1 and `int.MaxValue - 4`.
-Up to that many requests run at once and as many ordinary requests wait in FIFO
-order. The shared queue has four extra places reserved for `auth:`/`logout`.
-Commands keep their order relative to requests and enter the queue without
-waiting, so a pending command does not stop text `ping` or transport PONG reads.
-If a command arrives when the shared queue is full, the server closes the
-connection with status 1008 (Policy Violation).
-An ordinary request can pause reading while waiting for a request place or shared
-queue space, for at most `RequestQueueTimeout`; on timeout it receives `BusyError`
-(`darkws:error:busy`) and reading continues.
-Keep `RequestQueueTimeout` below `KeepAliveTimeout` and the clients' pong timeouts.
-The waiting queue holds at most the request limit plus four messages. Budget also
-for running requests and messages currently being received or dispatched, each
-subject to `MaxMessageSizeBytes`; size the limits for the expected connection count.
-Responses may arrive out of order; correlate them by `id`. The host application or reverse proxy
-must enforce a total concurrent connection limit and any per-user/IP limits;
-DarkWS only bounds requests within each connection.
-
-`RunActionsOnThreadPool` defaults to `false`. Set it to `true` to run action
-processing on the thread pool, so a synchronous handler (or the part before its
-first `await`) does not block dispatching the next request or `auth:`/`logout`.
-Scheduled actions still count toward `MaxConcurrentRequestsPerConnection`; queue
-backpressure and command ordering remain in effect. Each action captures its
-DarkWS session before scheduling. Handler execution and responses may occur out
-of order; shared `HttpContext` and `ISession` still require synchronization.
-
-On .NET 9/10, transport PING/PONG detects unresponsive peers using
-`KeepAliveInterval` and `KeepAliveTimeout`. On .NET 8, `ReceiveIdleTimeout` bounds
-each pending socket read, resetting after every received fragment; a timeout
-aborts the socket and removes the connection during cleanup. Idle .NET 8 clients
-must send application traffic (for example, text `ping`) within this timeout.
-The browser client sends `ping` every 30 seconds by default. The receive timer
-does not run while a full request queue pauses reads. A fragment can also be a
-partial read of a frame; transport PONGs do not count as application traffic.
-Timeout options must be positive and at most 4294967294 milliseconds.
-Choose timeouts that tolerate expected handler latency and client timer throttling.
-
-## Typed sessions
-
-Applications can attach immutable domain data to each connection:
-
-```csharp
-using System.Security.Claims;
-using DarkWS.Abstractions;
-
-public sealed record AppSession(
-    string Id,
-    ClaimsPrincipal User,
-    Guid AccountId,
-    Guid UserId
-) : IDarkWsSession {
-    public IReadOnlyCollection<string> Groups =>
-        [$"account:{AccountId}", $"user:{UserId}"];
-}
-```
-
-Register an `IDarkWsAuthenticator` that returns `AppSession`:
-
-```csharp
-builder.Services
-    .AddDarkWs()
-    .AddHandlersFromAssemblyContaining<Program>()
-    .AddAuthenticator<AppAuthenticator, AppSession>();
-```
-
-Typed handlers receive the same session through inheritance and DI:
-
-```csharp
-[Handler("message")]
-public sealed class MessageHandler(MessageService messages)
-    : HandlerBase<AppSession> {
-    [Action("send")]
-    public async Task<IResponse> SendAsync(MessageInput input) {
-        var result = await messages.SendAsync(Session.UserId, input);
-        await PublishAsync(
-            BroadcastTarget.Group($"account:{Session.AccountId}"),
-            "message:created",
-            result
-        );
-        return Ok(result);
+// Actions require a signed-in user; the ASP.NET Core identity (cookie, JWT) is used by default.
+[Handler("todo")]
+public sealed class TodoHandler(TodoStore store) : HandlerBase {
+    [Action("add")]
+    public async Task<IResponse> AddAsync(NewTodo input) {
+        var todo = await store.AddAsync(input.Title, ConnectionAborted);
+        await PublishAsync(BroadcastTarget.All, "todo:added", todo);
+        return Ok(todo);
     }
 }
 ```
 
-Scoped services can inject `IDarkWsContextAccessor` to access the current
-DarkWS session, `HttpContext`, connection, and cancellation token.
-This works only in the initialized message scope. Access from ordinary HTTP or
-connection scopes throws `InvalidOperationException`; lifecycle hooks must
-use the context passed to them. The session there is the one the action was
-authorized with: an `auth:` or `logout` arriving while the action runs does not
-change it (`IWebSocketConnection.Session` stays live).
-
-Each `auth:` command resolves `IDarkWsAuthenticator` from its own scope. Lifecycle
-hooks and the authenticator of the upgrade request live in that request's
-scope for the whole connection; resolve short-lived dependencies such as a
-`DbContext` through `IServiceScopeFactory` inside them. A nullable action parameter permits missing
-or null payloads. By default, non-nullable parameters require a payload. Set
-`DarkWsOptions.AllowNullPayloads = true` to pass omitted/null data to reference
-parameters even when their annotations say non-nullable. Handlers must then handle
-null themselves. Non-nullable value types still cannot receive CLR null; malformed values and
-numeric overflows return `darkws:error:invalid-request` without invoking the handler.
-
-Results are serialized before the message scope is disposed, so a deferred query
-over a scoped service is enumerated while that service is alive. A `null` result,
-a result that cannot be serialized (a reference cycle, an unsupported type), or a
-custom `IResponse` that fails before sending is answered with
-`darkws:error:request-failed` and logged; the connection stays open.
-
-Configure options through `AddDarkWs`, `services.Configure<DarkWsOptions>`, binding,
-or `PostConfigure`. Registrations run in the standard Options order. Validation
-runs when options are resolved and on host startup (`OptionsValidationException`).
-Options are captured by the connection or singleton service that consumes them;
-this does not promise live reconfiguration of existing connections/backplanes.
-
-`SendTimeout` defaults to 30 seconds and covers both waiting for the send lock
-and writing to the socket. `BroadcastSendTimeout` can impose a shorter deadline
-on broadcasts. Within one broadcast, all local recipients are written concurrently;
-a slow socket is aborted after `BroadcastSendTimeout` without holding up other
-recipients of that message. The in-memory publisher awaits local delivery; Redis
-publication only awaits Redis acceptance. Each Redis subscription runs up to 16
-deliveries concurrently, so unrelated broadcasts can proceed while a slow recipient
-occupies a slot. Broadcast order on one connection is not guaranteed. Pending Redis
-messages still use the library's unbounded queue: limit publisher rate and payload
-size to avoid memory growth under sustained overload. The publisher's cancellation token prevents
-publishing but does not cancel delivery that has started, so cancelling one handler
-cannot interrupt writes to other connections. `ShutdownTimeout` is one shared deadline for pending handlers,
-close hooks, and the close handshake. Shutdown removes the connection from
-storage immediately and cancels handler tokens. The socket is aborted when close
-cannot finish in time. Handlers must observe `ConnectionAborted`: .NET cannot
-forcibly stop arbitrary application code. If a handler ignores cancellation,
-its scope and connection resources are retained until it finishes; no response
-is sent afterward. The upgrade `HttpContext` is not retained: once shutdown
-completes, `HttpContext`, `AspNetSession`, and `IWebSocketConnection.HttpContext`
-throw `ObjectDisposedException`, because ASP.NET Core recycles the context of a
-finished request. Copy request values such as `Items` or headers before work that
-does not observe `ConnectionAborted`; `Session` and its `User` stay readable.
-Disposal coordinates with concurrent socket operations.
-In `OnCloseAsync`, `ConnectionAborted` is that shutdown deadline rather than the
-already cancelled handler token, so asynchronous cleanup can run until it expires.
-
-Connection lifecycle hooks derive from `DarkWsConnectionHooks` and are registered
-explicitly; assembly scanning registers only handlers:
-
-```csharp
-builder.Services.AddDarkWs()
-    .AddHandlersFromAssemblyContaining<Program>()
-    .AddConnectionHooks<PresenceHooks>();
-```
-
-Session/group broadcasts use indexes. Session groups are snapshotted when a
-connection is added or re-authenticated. If an application changes group membership
-on its own, call `Refresh(connection)` on the injected `IDarkWsConnections` to
-refresh the indexes. It returns false for a closed or unregistered connection, so a
-refresh that races with disconnect cannot register it again. `IDarkWsConnections`
-also looks up local connections by id, session, or group.
-
-`PublishAsync` takes a `BroadcastTarget` that selects the recipients. For
-several groups, publish once with `BroadcastTarget.Groups`; a connection in
-several of them receives one notification. Group targets can skip recipients:
-
-```csharp
-await broadcaster.PublishAsync(
-    BroadcastTarget.Groups(["account:42", "editors"]).ExceptConnection(sourceConnectionId),
-    "document:changed", new { DocumentId = 7 });
-await broadcaster.PublishAsync(
-    BroadcastTarget.Group("account:42").ExceptSession(sourceSessionId),
-    "document:changed");
-```
-
-`ExceptConnection` skips one tab/connection; `ExceptSession` skips every connection
-in that session. When both are set, either match is excluded. `All`, `Connection`,
-and `Session` targets do not take exclusions. The same `PublishAsync` helpers exist
-on `HandlerBase`; use `Connection.Id` to exclude the calling connection.
-Selection uses one snapshot of indexed group/session membership. `Groups` reads its
-sequence once, collapses duplicates, and an empty sequence does not publish; unknown
-groups have no recipients. Null collections and blank ids or group names are rejected.
-`All`, `Connection`, `Session`, and `Group` targets without exclusions keep the
-existing single-target envelope. Custom `IBroadcaster` implementations implement the
-two `PublishAsync` overloads that take a cancellation token; the token-less ones
-forward to them. In handlers, `Self` targets the calling connection.
-
-For ASP.NET session state, register `AddSession()` and place `UseSession()`
-before `MapDarkWs()`. WebSockets are long-lived requests, so call
-`HttpContext.Session.CommitAsync()` when a change must be persisted immediately.
-
-Up to `MaxConcurrentRequestsPerConnection` actions of one connection run at the
-same time and share its upgrade `HttpContext`, including `Items`, features, and the
-ASP.NET `ISession`. These objects are not thread-safe. Do not modify them from
-concurrent actions: keep per-request state in scoped services, read what an action
-needs at its start, and serialize `ISession` access yourself (or set
-`MaxConcurrentRequestsPerConnection = 1`) when actions write session state.
-`HttpContext.User` is replaced on authentication and logout.
-
-## Redis backplane
-
-The core package uses the in-memory backplane by default. Redis requires an
-existing `IConnectionMultiplexer` and an explicit channel name:
-
-```csharp
-using DarkWS.Redis;
-using StackExchange.Redis;
-
-builder.Services.AddSingleton<IConnectionMultiplexer>(redis);
-builder.Services.AddDarkWs().AddRedis("my-app:production");
-```
-
-Use a unique channel per application and environment. Handler code does not
-change when the backplane changes. Call `AddRedis` once per service
-collection; a second call throws `InvalidOperationException` rather than
-silently replacing the channel.
-
-Redis Pub/Sub delivers at most once. Broadcasts published while an instance is
-disconnected from Redis (restart, failover, network loss) never reach that
-instance's clients, and nothing reports the gap. Treat broadcasts as change
-notifications, not as the record of state: after `IConnectionMultiplexer.ConnectionRestored`,
-as after a client reconnect, have clients refresh from the source of truth.
-
-The Redis envelope is independent of application `JsonOptions`: its fixed fields
-are `target`, `targetId`, `action`, and `data`, with numeric targets All=0,
-Connection=1, Session=2, Group=3, Groups=4. These values must never be reassigned. Application
-payloads retain their configured JSON representation inside `data`. Default-format
-older peers remain compatible. Coordinate migration or change channels if older
-instances emitted a custom envelope naming policy.
-
-Group unions and all exclusion overloads use Groups=4, a `groups` array, a null
-`targetId`, and optional `except.connectionId` / `except.sessionId`. Even a single
-group with an exclusion uses this new target, so old nodes cannot silently deliver
-it without applying the exclusion. Old nodes reject this target and do not deliver
-the notification. Upgrade **all** server and Redis packages on a shared channel
-before using the new methods, or use a separate channel during rollout. Legacy
-single-target messages and client-facing notification envelopes remain unchanged.
-
-A Redis backplane supports one active subscription. Unsubscribe before replacing
-it; repeated Subscribe calls throw `InvalidOperationException`. Its listener token
-is cancelled when the subscription token is cancelled or Unsubscribe runs.
-CI exercises StackExchange.Redis 2.13.17 and 3.2.1 without raising the package minimum.
-
-Treat the Redis channel as a trusted boundary: anyone allowed to publish can send
-notifications to clients across all instances. Isolate Redis by network access
-and channel ACLs, and scope channels per application/environment. Logical Redis
-database numbers do **not** isolate Pub/Sub channels ([Redis documentation](https://redis.io/docs/latest/develop/pubsub/#database--scoping)).
-`MaxMessageSizeBytes` limits WebSocket input, not Redis messages.
-
-## .NET client
-
-```csharp
-await using var client = new DarkWS.Client.DarkWsClient(new Uri("wss://example.com/ws"));
-var result = await client.RequestAsync<MyResult>("my:action", new { value = 42 });
-```
-
-The first request connects automatically. The core package has no ASP.NET or DI
-dependency. For optional DI, install `DarkWS.Client.DependencyInjection` and call
-`services.AddDarkWsClient(options => options.Endpoint = endpoint)`; inject
-`IDarkWsClient`. One client owns one server session, so use separate instances for
-different accounts. See [client usage and defaults](DarkWS.Client/readme.md) and
-[DI lifetime examples](DarkWS.Client.DependencyInjection/readme.md).
-
-## Browser client
+Browser:
 
 ```ts
 import DarkWs from "darkws";
 
-const client = new DarkWs({
-  secure: location.protocol === "https:",
-  host: location.host,
-  path: "/ws",
-  query: () => ({ token: getAccessToken() }),
-}).connect();
+const client = new DarkWs({ secure: true, path: "/ws" }).connect();
 
-const message = await client.request<Message, SendMessageInput>(
-  "message:send",
-  { text: "Hello" },
-);
-
-const unsubscribe = client.on("message", (event) => {
-  console.log("Broadcast", event);
-});
-
-await client.authenticate(getAccessToken());
-
-// Resolve only after the server confirms the session was cleared.
-await client.logout();
-
-unsubscribe();
-client.dispose();
+const todo = await client.request<Todo>("todo:add", { title: "Ship it" });
+client.onAction<Todo>("todo:added", todo => render(todo));
 ```
 
-`dispose()` is terminal: it stops reconnect and ping timers, closes the socket,
-and rejects pending requests.
+.NET:
 
-`client.onAction<TData>(action, callback)` subscribes to one exact broadcast action
-and passes its `data` directly (`undefined` when omitted). It returns an idempotent
-unsubscribe function for that subscription. Other listeners and the full-envelope
-`message` event are unchanged; action subscriptions survive reconnects. The type
-argument describes the expected payload without runtime validation.
+```csharp
+await using var client = new DarkWsClient(new Uri("wss://example.com/ws"));
+var todo = await client.RequestAsync<Todo>("todo:add", new { title = "Ship it" });
+using var subscription = client.On<Todo>("todo:added", Render);
+```
 
-Requests also accept `request(action, data, { timeout, retry })`; the existing
-numeric third-argument timeout remains supported. `timeout` is the reply deadline
-per attempt in milliseconds. `retry: { connectionClosed: 2, timeout: 1, jitter: 250 }`
-allows two additional attempts on connection loss, one on timeout, and a random
-delay of up to 250 ms before each retry. Both retry counts and jitter default to
-zero. Counts must be non-negative safe integers; jitter must be finite and within
-0–2147483647 ms. Invalid retry settings reject with `RangeError` before connecting.
-Use retries **only for idempotent actions**: the server may have executed an action
-whose response was lost. Each attempt gets a fresh id, and late replies are ignored.
-`ConnectionClosedError.sent` is true if any attempt reached `WebSocket.send()`,
-even when the last attempt was unsent; this does not confirm server execution.
-Retries may open a connection even with `reconnect: false`, but explicit `close()`
-or `dispose()` cancels them. Control commands and server error replies are not retried.
+## Why DarkWS
 
-`maxPendingRequests` defaults to 256 (a positive safe integer). It counts pending
-`request()`, `authenticate()`, and `logout()` calls, including connection waits
-and retry delays. One call retains one slot until it settles; retries reuse it.
-An excess call immediately returns a rejected promise with `RangeError`, adding
-no request, timer, or internal retry. Raise the option explicitly if the application
-needs more concurrency. Automatic session restoration bypasses the budget so a
-full queue can authenticate; raw `send()` calls are outside the request budget.
+- **Request/response, not just messages.** Every call gets a typed result or a
+  typed error code. Responses are correlated by id, so many requests share one
+  socket and may complete in any order.
+- **Feels like ASP.NET Core.** Handlers get constructor injection and a fresh DI
+  scope per request, the ASP.NET identity works out of the box, and options use the
+  standard Options pipeline with startup validation.
+- **Targeted broadcasts.** Send to everyone, one connection, every tab of a user, or
+  a union of groups with the caller excluded, serialized once for all recipients.
+- **Scale out in one line.** `.AddRedis("my-app:prod")` fans broadcasts out across
+  instances. Handler code does not change.
+- **Safe by default.** Actions require authentication unless marked
+  `[AllowAnonymous]`. Message size, concurrency, queue length, and send time are
+  bounded per connection; origins can be restricted; handler exceptions never leak
+  to clients.
+- **Resilient clients.** Both clients reconnect with backoff, detect half-open
+  sockets with heartbeats, restore the session before sending queued requests, and
+  offer opt-in retries for idempotent calls.
+- **Testable.** `DarkWS.Testing` runs actions through the real pipeline, including
+  authorization, filters, and broadcasts, without a server or a socket.
+- **A protocol you can read.** Four JSON shapes and three text commands. Write a
+  client for another platform in an afternoon.
+- **Small.** The browser client has zero dependencies and is about 6 KB gzipped.
 
-`authenticate("")` rejects immediately with `TypeError` without connecting or
-sending anything; use `logout()` to sign out. `controlTimeout` sets an independent
-reply deadline for authentication, logout, and automatic session restoration:
-30000 ms by default, or `0` to disable it. Each deadline starts after that command
-is sent, excluding connection and command-queue waits. Expiry rejects with
-`RequestTimeoutError`, closes the socket, and rejects queued commands with
-`ConnectionClosedError`. Set `controlTimeout` explicitly to your previous
-`requestTimeout` value if you need to preserve the old control-command deadline.
+## Fast
 
-Connection waits resolve on `open` and have a separate `waitConnectionTimeout`
-(30 seconds by default). The response `requestTimeout` starts only after sending
-(5 minutes by default), so a call can take up to the sum of the two timeouts.
-`requestTimeout: 0` disables response expiry; that request stays pending until a
-response, disconnect, or disposal. Construction starts no timer; ping starts on
-successful connection and stops when it closes. An explicit close, or any close
-with `reconnect: false`, rejects connection waiters immediately. An error response is recognized by the presence of `error`,
-including an empty string from an external server; DarkWS itself rejects empty codes.
-Text `ping` is sent every `pingInterval` (30 seconds; `pingTimeout` remains a
-deprecated alias); a missing `pong` within `pongTimeout` (30 seconds) drops the
-socket and reconnects, which detects half-open connections. `connect()` keeps an
-open or opening socket, `close(code)` accepts only 1000 or 3000–4999, and request ids
-do not require a secure context.
+Broadcasting to 1 000 local recipients takes about **0.14 ms and 12 KB** of
+allocation, because the payload is serialized once and written to all sockets in
+parallel (.NET 10, Ryzen 7 3700X, in-memory transport).
 
-Use `client.isCurrentSocket(event)` in `open`/`close` listeners to distinguish the
-current socket from a replaced one without changing the event payload. It checks
-socket identity, including a current socket's close event, and returns `false`
-for every event after disposal. With `reconnectOnVisible: true` (default `false`),
-a visible tab immediately retries a pending automatic reconnect instead of
-waiting out the backoff. Connection hooks and gates still apply; open/opening
-sockets, explicit close, disposal, and `reconnect: false` are respected. Disposal
-removes the visibility listener; environments without `document` use timers only.
+| Recipients | Serialize per recipient | DarkWS fanout |
+| ---: | ---: | ---: |
+| 100 | 0.27 ms | 0.02 ms |
+| 1 000 | 2.90 ms | 0.14 ms |
+| 10 000 | 6.04 ms | 2.20 ms |
 
-To restore the session on every socket, pass `authenticationToken: () => token`.
-The client sends `auth:<token>` when a socket opens and holds queued and new
-requests until `auth:success`, so a request made during reconnect cannot reach the
-server before authentication; `open` fires after that exchange. `auth:failed` or
-a provider error rejects the queued requests and leaves the connection without a
-session; returning no token connects anonymously. Calling `authenticate()` from an
-`open` listener does not provide this ordering.
-`sessionRestoreFailed(error, event)` reports this failure before the anonymous-ready
-`open` event. A listener can call `close()` to prevent that fallback; `event` is the
-native opening event and works with `isCurrentSocket(event)`.
+Full numbers and methodology: [Performance](https://bobsans.github.io/DarkWS/performance).
 
-## Protocol
+## Tested
 
-### Client lifecycle contract
-
-The clients share the wire protocol but keep these distinct lifecycle policies:
-
-| Case | Browser `DarkWs` | .NET `DarkWsClient` |
-| --- | --- | --- |
-| Socket drops with reconnect disabled | Pending calls fail; no background retry. The next request or send opens a new socket. | Pending calls fail. Later calls fail until explicit `ConnectAsync`. |
-| Automatic authentication receives `auth:failed` | Queued calls reject with `ErrorResponse`. `sessionRestoreFailed` fires, then `open` signals readiness without a restored session; later calls can be sent anonymously. | Readiness fails with `DarkWsResponseException`. State becomes `Disconnected` with the failure reason and automatic retries stop. Correct the credentials and call `ConnectAsync`. |
-| Automatic token provider throws | Same failure event and fallback if the socket is still open. | Permanent readiness failure; correct the provider and call `ConnectAsync`. |
-| Automatic token provider returns no token | Connects anonymously without `sessionRestoreFailed`. | Permanent readiness failure. |
-
-`sessionRestoreFailed` also covers the first connection. It is not emitted for
-manual `authenticate()` rejection, successful restoration, an intentionally empty
-token, or a failed attempt whose socket has already closed or been replaced.
-It precedes `open`; closing or disposing in its listener prevents anonymous readiness.
-Browser `connected` reports transport state, and `open` alone does not prove that
-authentication succeeded. The .NET `Connected` state follows successful restoration.
-These policies also apply through `LazyDarkWs`; its explicit `close()` additionally
-allows the next use to reconnect, as documented for the facade.
-
-### Messages
-
-| Direction | Shape |
+| | |
 | --- | --- |
-| Request | `{ "id": string, "action": string, "data"?: unknown }` |
-| Success | `{ "id": string, "data"?: unknown }` |
-| Error | `{ "id": string, "error": string, "data"?: unknown }` |
-| Broadcast | `{ "id": "@", "action": string, "data"?: unknown }` |
+| .NET tests | 278, run on .NET 8, 9, and 10 |
+| Browser client tests | 127 |
+| Line coverage | 94.9–100% per package, gated at 90% |
+| Branch coverage | 93.1–100% per package, gated at 80% |
+| Redis | Integration tests against real Redis, StackExchange.Redis 2.13 and 3.2 |
+| Packages | Every NuGet and npm package is packed, installed into a clean project, and run in CI |
+| Public API | Tracked with PublicApiAnalyzers; breaking changes only in major versions |
 
-Request arguments are sent in `data`; broadcasts carry `action` at the top level.
-The browser client's `message` event receives the full broadcast envelope.
-`data` is omitted only by the overloads without data (`Ok()`, `PublishAsync(target, action)`);
-the data overloads always write it, as `null` when the value is null, whatever the
-application's `JsonOptions.DefaultIgnoreCondition`.
-This schema is incompatible with the previous request `payload`, nested broadcasts,
-and `darkws:authenticate` action. Upgrade server and clients together; roll them
-back together if needed. The CLR `InputMessage.Payload` property and SDK method
-payload parameters retain their names but map to the wire `data` field.
+## Packages
 
-System commands and their replies are plain text, without JSON or request ids:
-
-| Command | Success | Rejection |
+| Package | | Purpose |
 | --- | --- | --- |
-| `auth:<token>` | `auth:success` | `auth:failed` |
-| `logout` | `logout:success` | Connection failure if the operation cannot complete |
-| `ping` | `pong` | No application error reply |
+| `DarkWS` | [![NuGet](https://img.shields.io/nuget/v/DarkWS.svg)](https://www.nuget.org/packages/DarkWS) | ASP.NET Core server with an in-memory backplane |
+| `DarkWS.Redis` | [![NuGet](https://img.shields.io/nuget/v/DarkWS.Redis.svg)](https://www.nuget.org/packages/DarkWS.Redis) | Redis backplane for multi-instance deployments |
+| `DarkWS.Client` | [![NuGet](https://img.shields.io/nuget/v/DarkWS.Client.svg)](https://www.nuget.org/packages/DarkWS.Client) | Async .NET client |
+| `DarkWS.Client.DependencyInjection` | [![NuGet](https://img.shields.io/nuget/v/DarkWS.Client.DependencyInjection.svg)](https://www.nuget.org/packages/DarkWS.Client.DependencyInjection) | Microsoft DI registration for the .NET client |
+| `DarkWS.Testing` | [![NuGet](https://img.shields.io/nuget/v/DarkWS.Testing.svg)](https://www.nuget.org/packages/DarkWS.Testing) | Test handlers without sockets |
+| `darkws` | [![npm](https://img.shields.io/npm/v/darkws.svg)](https://www.npmjs.com/package/darkws) | Dependency-free browser client with TypeScript types |
 
-The protocol uses text frames only. The server currently processes a binary frame
-like a text frame with the same bytes, while the .NET client closes the socket
-with 1003; clients must not rely on binary frames being accepted.
-
-Request ids must be non-empty and must not be `@` or `@auth`. A request using a
-reserved id is rejected without invoking its action. The `invalid-request` response
-uses an empty id because echoing a reserved id would turn it into a control event.
-
-Upgrade authenticator exceptions are logged as warnings and return HTTP 401 by
-default. Set `AcceptAnonymousOnUpgradeAuthenticationException = true` to accept
-the socket with a null session and anonymous principal instead. Returning null
-from the authenticator still permits an anonymous upgrade as before; the option
-applies only to exceptions. Request/shutdown cancellation is not treated as an
-authentication failure.
-
-By default, failed `auth:` commands (rejection, an empty token, or an exception)
-clear the previous session and principal. Set `KeepSessionOnFailedAuthentication = true`
-to retain the current session, principal, and membership indexes. The reply remains
-`auth:failed`, and `OnAuthenticatedAsync` is not called for the unchanged session.
-Successful authentication still replaces the session. Explicit `logout` always
-clears it. Replacements and clearing notify `OnAuthenticatedAsync`, whose current
-session may now be null. Already running actions are not rolled back by logout.
-Session retention does not validate or extend the previous session's lifetime;
-the application must still enforce expiry and revocation.
-JSON actions `darkws:authenticate` / `darkws:logout` are no longer system commands, and
-`@auth` replies are no longer emitted. `@auth` remains a reserved legacy request id.
-Text authentication always replies `auth:failed`.
-
-Clients serialize authentication and logout because text replies have no correlation
-id. A timeout (or cancellation while waiting in .NET) discards the socket so a late
-reply cannot complete the next command. No automatic replay of a sent command occurs.
-Wait for authentication success before sending protected application requests.
-
-The clients do not retain tokens passed to `authenticate`; reconnect uses only the
-application-owned `query`/token provider. Update that source after logout so
-reconnect cannot restore old credentials. Token expiry or revocation does not automatically close an existing
-connection: enforce session lifetimes and ongoing authorization in the host app.
-
-DarkWS does not limit `auth:` attempts: one connection can try tokens as fast as
-the network allows, and every attempt runs the authenticator. Use high-entropy
-tokens, and when tickets are short or validation is expensive, count failures in
-the authenticator (keyed by `HttpContext.Connection.Id`, user, or client IP) and
-call `HttpContext.Abort()` to drop the connection once a limit is reached.
-
-Tokens in WebSocket URLs can enter proxy/access logs and telemetry. Prefer a
-short-lived connection ticket; when the endpoint permits an anonymous upgrade
-and the application authenticator supports it, omit the token from `query` and
-use `authenticationToken` (browser) or `AuthenticationTokenProvider` (.NET) so
-every socket authenticates before protected requests. Use WSS and redact
-credentials in URL and message logging. The application owns token validation,
-expiry, and revocation. See [ASP.NET Core token logging guidance](https://learn.microsoft.com/en-us/aspnet/core/signalr/security#access-token-logging).
-
-All NuGet packages include XML API documentation and portable symbol packages
-with embedded source files. `scripts/test-packages.ps1` checks every target's XML
-and PDB entries after packing.
-
-## Testing
-
-Run the complete build, test, Redis integration, and coverage gate:
-
-```powershell
-pwsh ./scripts/test-coverage.ps1
+```bash
+dotnet add package DarkWS
+npm install darkws
 ```
 
-Docker must be running for Redis integration tests. Current gates require at
-least 90% line coverage and 80% branch coverage for every package.
+The .NET packages target .NET 8, 9, and 10. Native AOT and trimming are not
+supported.
 
-The gate also packs all four NuGet libraries, verifies documentation/symbols, restores
-them into a consumer with an isolated package cache, and runs it on all target
-frameworks. A fresh npm copy without `dist` is packed to verify the prepack build.
-CI retains the resulting packages as artifacts. Successful actions and malformed
-client requests are logged at Debug; unexpected handler failures remain warnings.
+## Learn more
 
-Manual performance scenarios live in [benchmarks](benchmarks/README.md); they
-are not run on every PR. All libraries enforce reviewed public API baselines
-with PublicApiAnalyzers; see [API maintenance](docs/public-api.md).
-
-## Roadmap
-
-- Add an optional high-level browser API for token refresh, safe read retries,
-  and application-level error handling.
-
-## Versioning
-
-The build uses the exact SDK in `global.json`. Common project settings live in
-`Directory.Build.props`; NuGet versions are centralized in `Directory.Packages.props`.
-
-All five packages use one SemVer version. Update every manifest and the npm
-lockfile with one command:
-
-```powershell
-pwsh ./scripts/set-version.ps1 4.0.0
-```
-
-CI runs `scripts/test-version.ps1` and rejects inconsistent package versions.
-Release tags must use the matching `vX.Y.Z` form, including an optional SemVer
-prerelease suffix such as `v3.0.0-rc.1`.
-
-Read [CHANGELOG](CHANGELOG.md) before upgrading. The 2.1.0 entry explains the new
-1 MiB input limit and migration for applications sending larger messages. Future
-changes that reject previously accepted input must include a behavior-change entry,
-migration/configuration guidance, and a SemVer compatibility decision before release.
-Substantial breaking defaults require a major release or an explicit compatibility
-option. The release workflow requires a changelog heading for the published version.
-
-## Publishing
-
-Publishing uses GitHub Actions OIDC trusted publishing. No long-lived NuGet or
-npm publish tokens are stored in GitHub.
-
-One-time registry setup:
-
-1. Create GitHub environment `release` and optionally add required reviewers.
-2. Add repository variable `NUGET_USER` with the NuGet.org profile name.
-3. On NuGet.org, add a trusted publishing policy for owner `Bobsans`, repository
-   `DarkWS`, workflow `release.yml`, and environment `release`.
-4. On the existing `darkws` npm package, configure its trusted publisher for
-   owner `Bobsans`, repository `DarkWS`, workflow `release.yml`, environment
-   `release`, with direct `npm publish` allowed.
-
-For each release:
-
-1. Run `scripts/set-version.ps1` and commit the version change.
-2. Create a GitHub Release using the matching `vX.Y.Z` tag.
-3. The release workflow validates the tag and runs every test and coverage gate in
-   a `verify` job that has no publishing permission; the gate packs, inspects, and
-   installs the packages it keeps as artifacts. A separate `publish` job in the
-   `release` environment, the only job with `id-token: write`, downloads exactly
-   those files and publishes all four NuGet packages and the npm tarball without
-   installing dependencies or rebuilding.
-
-Prerelease versions require a GitHub prerelease and use the npm `next` tag.
-Stable versions use the npm `latest` tag. Re-running a release is safe: NuGet
-uses `--skip-duplicate`, and npm skips an already published version.
+- [Getting started](https://bobsans.github.io/DarkWS/getting-started)
+- [Handlers and actions](https://bobsans.github.io/DarkWS/server/handlers) ·
+  [Authentication and sessions](https://bobsans.github.io/DarkWS/server/authentication) ·
+  [Broadcasts](https://bobsans.github.io/DarkWS/server/broadcasts) ·
+  [Redis](https://bobsans.github.io/DarkWS/server/redis)
+- [Browser client](https://bobsans.github.io/DarkWS/clients/browser) ·
+  [.NET client](https://bobsans.github.io/DarkWS/clients/dotnet)
+- [Protocol](https://bobsans.github.io/DarkWS/protocol) ·
+  [Security](https://bobsans.github.io/DarkWS/security) ·
+  [Upgrading to 5.0](https://bobsans.github.io/DarkWS/upgrading)
+- [Changelog](CHANGELOG.md)
 
 ## Contributing
 
-Keep changes focused, add behavior tests, and run the complete coverage gate
-before opening a pull request. Report vulnerabilities privately as described in
-[SECURITY](SECURITY.md), not in public issues.
+Issues and pull requests are welcome. See [docs/development.md](docs/development.md)
+for building, testing, and releasing, and [SECURITY.md](SECURITY.md) for reporting
+vulnerabilities privately.
 
 ## License
 
-DarkWS is licensed under the [MIT License](LICENSE).
+[MIT](LICENSE)

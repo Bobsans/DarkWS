@@ -1,21 +1,31 @@
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/Bobsans/DarkWS/main/assets/icon.png" alt="DarkWS logo" width="96">
+
 # DarkWS.Client.DependencyInjection
 
-Optional Microsoft DI integration for DarkWS.Client on .NET 8, 9, and 10.
-Install with `dotnet add package DarkWS.Client.DependencyInjection`.
-No ASP.NET framework reference or Generic Host is required by the package.
+[![NuGet](https://img.shields.io/nuget/v/DarkWS.Client.DependencyInjection.svg?label=NuGet)](https://www.nuget.org/packages/DarkWS.Client.DependencyInjection)
+[![CI](https://github.com/Bobsans/DarkWS/actions/workflows/ci.yml/badge.svg)](https://github.com/Bobsans/DarkWS/actions/workflows/ci.yml)
+[![.NET](https://img.shields.io/badge/.NET-8%20%7C%209%20%7C%2010-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
+[![Docs](https://img.shields.io/badge/docs-bobsans.github.io%2FDarkWS-blue)](https://bobsans.github.io/DarkWS/clients/dotnet#dependency-injection)
+[![License](https://img.shields.io/github/license/Bobsans/DarkWS)](https://github.com/Bobsans/DarkWS/blob/main/LICENSE)
+
+</div>
+
+Microsoft DI registration for [DarkWS.Client](https://www.nuget.org/packages/DarkWS.Client).
+References only DI abstractions, not ASP.NET or the Generic Host.
+
+```bash
+dotnet add package DarkWS.Client.DependencyInjection
+```
 
 ```csharp
 using DarkWS.Client;
 using Microsoft.Extensions.DependencyInjection;
 
-var services = new ServiceCollection();
 services.AddDarkWsClient(options => {
     options.Endpoint = new Uri("wss://example.com/ws");
 });
-services.AddTransient<Calculator>();
-
-await using var provider = services.BuildServiceProvider();
-var result = await provider.GetRequiredService<Calculator>().SumAsync(10, 20);
 
 public sealed class Calculator(IDarkWsClient client) {
     public Task<int> SumAsync(int left, int right) =>
@@ -23,50 +33,13 @@ public sealed class Calculator(IDarkWsClient client) {
 }
 ```
 
-The example assumes a server action returning an integer. The application needs
-`Microsoft.Extensions.DependencyInjection` to build a container, or uses its
-existing host. This package only references DI abstractions and the core client.
+`AddDarkWsClient` registers one lazy singleton `IDarkWsClient`: resolving it does not
+connect, and the container owns disposal. For a separate session per scope, register
+`DarkWsClient` yourself.
 
-`AddDarkWsClient` registers one lazy singleton **IDarkWsClient**. Resolving it does
-not connect; the first request or `ConnectAsync` opens the socket. The container
-owns disposal. Injected consumers do not dispose the shared client; they own and
-dispose their subscriptions. Duplicate/conflicting registrations throw before
-mutating the collection. No hosted service or private provider is created.
+## Documentation
 
-Use application services for configuration or token refresh:
-
-```csharp
-services.AddDarkWsClient((provider, options) => {
-    options.Endpoint = new Uri("wss://example.com/ws");
-    var tokens = provider.GetRequiredService<TokenStore>();
-    options.AuthenticationTokenProvider = ct => tokens.GetAccessTokenAsync(ct);
-});
-```
-
-`TokenStore` must have a lifetime suitable for a singleton and return
-`ValueTask<string?>`. Do not capture scoped services in singleton callbacks.
-Token storage, refresh, and logout cleanup belong to the application.
-
-## Separate user sessions
-
-A singleton is suitable for one shared server identity. Use standard DI
-registration for separate identities per application scope:
-
-```csharp
-services.AddScoped<IDarkWsClient>(provider => {
-    var tokens = provider.GetRequiredService<UserTokenStore>();
-    return new DarkWsClient(new DarkWsClientOptions {
-        Endpoint = new Uri("wss://example.com/ws"),
-        AuthenticationTokenProvider = ct => tokens.GetAccessTokenAsync(ct)
-    });
-});
-```
-
-Match the scope lifetime to the session: an ordinary HTTP request scope ends with
-that request. Do not combine this unkeyed registration with `AddDarkWsClient`.
-Keyed registrations (which `AddDarkWsClient` does not treat as duplicates) or
-application-owned instances cover multiple endpoints; there is no custom
-named-client framework.
-
-See the core package README for cancellation, reconnect, notification delivery,
-timeouts, and authentication rules.
+- [Dependency injection](https://bobsans.github.io/DarkWS/clients/dotnet#dependency-injection):
+  configuration from services, per-scope sessions
+- [.NET client](https://bobsans.github.io/DarkWS/clients/dotnet)
+- [Документация на русском](https://bobsans.github.io/DarkWS/ru/clients/dotnet#dependency-injection)

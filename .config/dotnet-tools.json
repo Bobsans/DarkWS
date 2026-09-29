@@ -8,6 +8,13 @@
         "dotnet-coverage"
       ],
       "rollForward": false
+    },
+    "defaultdocumentation.console": {
+      "version": "1.2.5",
+      "commands": [
+        "defaultdocumentation"
+      ],
+      "rollForward": false
     }
   }
 }

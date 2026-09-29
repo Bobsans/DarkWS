@@ -1,0 +1,31 @@
+{
+  "name": "darkws-website",
+  "private": true,
+  "scripts": {
+    "docusaurus": "docusaurus",
+    "api:dotnet": "pwsh ../scripts/docs-api.ps1",
+    "start": "docusaurus start",
+    "start:ru": "docusaurus start --locale ru",
+    "build": "docusaurus build",
+    "serve": "docusaurus serve",
+    "clear": "docusaurus clear",
+    "write-translations": "docusaurus write-translations --locale ru"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.10.2",
+    "@docusaurus/preset-classic": "3.10.2",
+    "@mdx-js/react": "3.1.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@docusaurus/types": "3.10.2",
+    "docusaurus-plugin-typedoc": "1.4.3",
+    "typedoc": "0.28.20",
+    "typedoc-plugin-markdown": "4.13.1",
+    "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -4,7 +4,7 @@
 
 Security fixes are released for the latest major version of the DarkWS packages
 (`DarkWS`, `DarkWS.Redis`, `DarkWS.Client`, `DarkWS.Client.DependencyInjection`,
-and the `darkws` npm package). All packages share one version.
+`DarkWS.Testing`, and the `darkws` npm package). All packages share one version.
 
 ## Reporting a vulnerability
 
