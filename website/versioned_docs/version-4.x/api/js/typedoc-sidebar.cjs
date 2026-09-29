@@ -1,0 +1,4 @@
+// @ts-check
+/** @type {import("@docusaurus/plugin-content-docs").SidebarsConfig} */
+const typedocSidebar = {items:[{type:"category",label:"Classes",items:[{type:"doc",id:"api/js/classes/ConnectionClosedError",label:"ConnectionClosedError"},{type:"doc",id:"api/js/classes/DarkWs",label:"DarkWs"},{type:"doc",id:"api/js/classes/ErrorResponse",label:"ErrorResponse"},{type:"doc",id:"api/js/classes/RequestTimeoutError",label:"RequestTimeoutError"}]},{type:"category",label:"Interfaces",items:[{type:"doc",id:"api/js/interfaces/DarkWsEvents",label:"DarkWsEvents"},{type:"doc",id:"api/js/interfaces/DarkWsOptions",label:"DarkWsOptions"},{type:"doc",id:"api/js/interfaces/DarkWsRequest",label:"DarkWsRequest"}]}]};
+module.exports = typedocSidebar.items;

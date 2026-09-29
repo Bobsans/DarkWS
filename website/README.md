@@ -22,8 +22,19 @@ Sidebar category labels are translated in `i18n/ru/docusaurus-plugin-content-doc
 
 ## Versions
 
-`docs/` is always the upcoming release. Before starting the next major version,
-snapshot the current one with both API references generated:
+`docs/` is the current major (5.x), served at the site root. Older majors live in
+`versioned_docs/version-<major>.x/` (and `i18n/ru/docusaurus-plugin-content-docs/version-<major>.x/`)
+and are served under `/<major>.x/` with an "unmaintained" banner; see `versions` in
+`docusaurus.config.ts`.
+
+Versioned pages, including their API reference under `api/`, are committed and never
+regenerated. The 4.x reference was generated once from tag `v4.0.0`: DefaultDocumentation
+over the net10.0 assemblies, and TypeDoc over `packages/darkws/src` with
+`--disableGit --sourceLinkTemplate https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/{path}#L{line}`
+so source links point at the tag.
+
+Before starting the next major version, snapshot the current one with both API
+references generated:
 
 ```bash
 npm run api:dotnet
@@ -31,6 +42,7 @@ npm run docusaurus docs:version 5.x
 ```
 
 This copies `docs/` into `versioned_docs/version-5.x/` and the Russian pages into
-`i18n/ru/docusaurus-plugin-content-docs/version-5.x/`. Commit both. Then
-set the label of `current` in `docusaurus.config.ts` to the new major. Version only
-majors and keep a few, since every version is a full copy per locale.
+`i18n/ru/docusaurus-plugin-content-docs/version-5.x/`, including the generated API
+reference. Commit both. Then in `docusaurus.config.ts` set the label of `current` to
+the new major and add `"5.x": { label: "5.x", path: "5.x", banner: "unmaintained" }`.
+Version only majors and keep a few, since every version is a full copy per locale.

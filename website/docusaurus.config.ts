@@ -30,14 +30,18 @@ const config: Config = {
         docs: {
           routeBasePath: "/",
           // Create a version on a major release: npm run docusaurus docs:version 5.x
-          versions: { current: { label: "5.x" } },
+          lastVersion: "current",
+          versions: {
+            current: { label: "5.x" },
+            "4.x": { label: "4.x", path: "4.x", banner: "unmaintained" },
+          },
           // Generated API pages have no source file to edit.
-          editUrl: ({ docPath, locale }) =>
+          editUrl: ({ docPath, locale, version, versionDocsDirPath }) =>
             docPath.startsWith("api/")
               ? undefined
               : locale === "en"
-                ? `${repository}/edit/main/website/docs/${docPath}`
-                : `${repository}/edit/main/website/i18n/${locale}/docusaurus-plugin-content-docs/current/${docPath}`,
+                ? `${repository}/edit/main/website/${versionDocsDirPath}/${docPath}`
+                : `${repository}/edit/main/website/i18n/${locale}/docusaurus-plugin-content-docs/${version === "current" ? "current" : `version-${version}`}/${docPath}`,
         },
         blog: false,
       } satisfies Preset.Options,

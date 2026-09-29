@@ -1,0 +1,13 @@
+# Local Release run of tag v4.0.0 for the 4.x documentation; .NET 10.0.12; AMD Ryzen 7 3700X; Windows 11; samples=5; iterations=20; payload_bytes=364
+# Observational baseline only; compare on the same machine/runtime, never as a CI threshold.
+scenario,recipients,median_ms_per_operation,median_allocated_bytes_per_operation
+serialize-per-recipient,100,0.3563,39220
+serialize-once,100,0.0039,1204
+in-memory-fanout,100,0.2098,36263
+serialize-per-recipient,1000,3.6933,384820
+serialize-once,1000,0.0102,1204
+in-memory-fanout,1000,2.6803,268167
+serialize-per-recipient,10000,6.4307,3840820
+serialize-once,10000,0.0225,1204
+in-memory-fanout,10000,13.6563,2646674
+parse-1000-requests,1,2.3489,984027

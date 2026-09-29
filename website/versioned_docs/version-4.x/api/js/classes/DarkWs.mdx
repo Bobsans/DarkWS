@@ -1,0 +1,289 @@
+# Class: DarkWs
+
+Defined in: [packages/darkws/src/dark-ws.ts:77](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L77)
+
+## Constructors
+
+### Constructor
+
+> **new DarkWs**(`options`): `DarkWs`
+
+Defined in: [packages/darkws/src/dark-ws.ts:105](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L105)
+
+#### Parameters
+
+##### options
+
+[`DarkWsOptions`](../interfaces/DarkWsOptions.mdx)
+
+#### Returns
+
+`DarkWs`
+
+## Properties
+
+### LOG\_PREFIX
+
+> `readonly` `static` **LOG\_PREFIX**: `"[DarkWs]"` = `"[DarkWs]"`
+
+Defined in: [packages/darkws/src/dark-ws.ts:78](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L78)
+
+## Accessors
+
+### closed
+
+#### Get Signature
+
+> **get** **closed**(): `boolean`
+
+Defined in: [packages/darkws/src/dark-ws.ts:121](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L121)
+
+##### Returns
+
+`boolean`
+
+***
+
+### closing
+
+#### Get Signature
+
+> **get** **closing**(): `boolean`
+
+Defined in: [packages/darkws/src/dark-ws.ts:117](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L117)
+
+##### Returns
+
+`boolean`
+
+***
+
+### connected
+
+#### Get Signature
+
+> **get** **connected**(): `boolean`
+
+Defined in: [packages/darkws/src/dark-ws.ts:125](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L125)
+
+##### Returns
+
+`boolean`
+
+***
+
+### pendingRequestCount
+
+#### Get Signature
+
+> **get** **pendingRequestCount**(): `number`
+
+Defined in: [packages/darkws/src/dark-ws.ts:129](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L129)
+
+##### Returns
+
+`number`
+
+## Methods
+
+### authenticate()
+
+> **authenticate**(`token`): `Promise`\<`void`\>
+
+Defined in: [packages/darkws/src/dark-ws.ts:208](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L208)
+
+#### Parameters
+
+##### token
+
+`string`
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
+### close()
+
+> **close**(`code?`): `void`
+
+Defined in: [packages/darkws/src/dark-ws.ts:233](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L233)
+
+#### Parameters
+
+##### code?
+
+`number` = `1000`
+
+#### Returns
+
+`void`
+
+***
+
+### connect()
+
+> **connect**(): `this`
+
+Defined in: [packages/darkws/src/dark-ws.ts:133](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L133)
+
+#### Returns
+
+`this`
+
+***
+
+### dispose()
+
+> **dispose**(): `void`
+
+Defined in: [packages/darkws/src/dark-ws.ts:244](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L244)
+
+#### Returns
+
+`void`
+
+***
+
+### logout()
+
+> **logout**(): `Promise`\<`void`\>
+
+Defined in: [packages/darkws/src/dark-ws.ts:212](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L212)
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
+### off()
+
+> **off**\<`K`\>(`event`, `callback`): `void`
+
+Defined in: [packages/darkws/src/dark-ws.ts:167](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L167)
+
+#### Type Parameters
+
+##### K
+
+`K` *extends* keyof [`DarkWsEvents`](../interfaces/DarkWsEvents.mdx)
+
+#### Parameters
+
+##### event
+
+`K`
+
+##### callback
+
+(...`args`) => `void`
+
+#### Returns
+
+`void`
+
+***
+
+### on()
+
+> **on**\<`K`\>(`event`, `callback`): () => `void`
+
+Defined in: [packages/darkws/src/dark-ws.ts:159](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L159)
+
+#### Type Parameters
+
+##### K
+
+`K` *extends* keyof [`DarkWsEvents`](../interfaces/DarkWsEvents.mdx)
+
+#### Parameters
+
+##### event
+
+`K`
+
+##### callback
+
+(...`args`) => `void`
+
+#### Returns
+
+() => `void`
+
+***
+
+### reconnect()
+
+> **reconnect**(): `void`
+
+Defined in: [packages/darkws/src/dark-ws.ts:146](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L146)
+
+#### Returns
+
+`void`
+
+***
+
+### request()
+
+> **request**\<`TResult`, `TPayload`\>(`action`, `payload?`, `timeoutMs?`): `Promise`\<`TResult`\>
+
+Defined in: [packages/darkws/src/dark-ws.ts:185](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L185)
+
+#### Type Parameters
+
+##### TResult
+
+`TResult`
+
+##### TPayload
+
+`TPayload` = `unknown`
+
+#### Parameters
+
+##### action
+
+`string`
+
+##### payload?
+
+`TPayload`
+
+##### timeoutMs?
+
+`number`
+
+#### Returns
+
+`Promise`\<`TResult`\>
+
+***
+
+### send()
+
+> **send**\<`T`\>(`data`, `jsonify?`): `Promise`\<`void`\>
+
+Defined in: [packages/darkws/src/dark-ws.ts:177](https://github.com/Bobsans/DarkWS/blob/v4.0.0/packages/darkws/src/dark-ws.ts#L177)
+
+#### Type Parameters
+
+##### T
+
+`T`
+
+#### Parameters
+
+##### data
+
+`T`
+
+##### jsonify?
+
+`boolean` = `true`
+
+#### Returns
+
+`Promise`\<`void`\>
