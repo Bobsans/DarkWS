@@ -19,6 +19,7 @@ internal sealed class WebSocketHandler(
     IOptions<DarkWsOptions> options,
     ILogger<WebSocketHandler> logger
 ) {
+    internal const int CommandReserve = 4;
     private static readonly byte[] _ping = "ping"u8.ToArray();
     private static readonly byte[] _pong = "pong"u8.ToArray();
     private static readonly byte[] _auth = "auth:"u8.ToArray();
@@ -37,8 +38,9 @@ internal sealed class WebSocketHandler(
         storage.Add(connection);
         var tasks = new List<Task>();
         var requests = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var requestPlaces = new SemaphoreSlim(_options.MaxConcurrentRequestsPerConnection, _options.MaxConcurrentRequestsPerConnection);
         var connectionContext = CreateContext(connection, requests.Token);
-        var queue = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_options.MaxConcurrentRequestsPerConnection) {
+        var queue = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_options.MaxConcurrentRequestsPerConnection + CommandReserve) {
             SingleReader = true,
             SingleWriter = true
         });
@@ -49,7 +51,7 @@ internal sealed class WebSocketHandler(
                 await middleware.OnOpenAsync(connectionContext);
             }
 
-            reader = ReceiveAsync(connection, queue.Writer, requests, cancellationToken);
+            reader = ReceiveAsync(connection, queue.Writer, requestPlaces, requests, cancellationToken);
             try {
                 // Messages are handled in arrival order; the reader cancels requests when it stops.
                 while (await queue.Reader.WaitToReadAsync(requests.Token) && queue.Reader.TryPeek(out var data)) {
@@ -75,6 +77,7 @@ internal sealed class WebSocketHandler(
                         }
 
                         queue.Reader.TryRead(out _);
+                        requestPlaces.Release();
                     }
                 }
             } catch (OperationCanceledException) when (requests.IsCancellationRequested && !cancellationToken.IsCancellationRequested) {
@@ -89,7 +92,7 @@ internal sealed class WebSocketHandler(
         } catch (Exception error) {
             Log.HandlerFailed(logger, error);
         } finally {
-            await ShutdownAsync(connection, tasks, requests, reader);
+            await ShutdownAsync(connection, tasks, requests, reader, requestPlaces);
         }
     }
 
@@ -98,6 +101,7 @@ internal sealed class WebSocketHandler(
     private async Task ReceiveAsync(
         WebSocketConnection connection,
         ChannelWriter<byte[]> queue,
+        SemaphoreSlim requestPlaces,
         CancellationTokenSource requests,
         CancellationToken cancellationToken
     ) {
@@ -110,8 +114,14 @@ internal sealed class WebSocketHandler(
 
                 if (message.Data.AsSpan().SequenceEqual(_ping)) {
                     await connection.SendAsync(_pong, cancellationToken);
-                } else if (!queue.TryWrite(message.Data)) {
-                    await EnqueueAsync(message.Data, connection, queue, requests.Token);
+                } else if (message.Data.AsSpan().StartsWith(_auth) || message.Data.AsSpan().SequenceEqual(_logout)) {
+                    // Commands share FIFO order with requests, but never stop receiving while waiting for space.
+                    if (!queue.TryWrite(message.Data)) {
+                        await connection.CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, "Command queue capacity exceeded", cancellationToken);
+                        return;
+                    }
+                } else {
+                    await EnqueueAsync(message.Data, connection, queue, requestPlaces, requests.Token);
                 }
             }
         } finally {
@@ -120,17 +130,24 @@ internal sealed class WebSocketHandler(
         }
     }
 
-    private async Task EnqueueAsync(byte[] data, IWebSocketConnection connection, ChannelWriter<byte[]> queue, CancellationToken cancellationToken) {
-        if (data.AsSpan().StartsWith(_auth) || data.AsSpan().SequenceEqual(_logout)) {
-            // Commands are rare and must keep their order, so they wait for a place.
-            await queue.WriteAsync(data, cancellationToken);
-            return;
+    private async Task EnqueueAsync(byte[] data, IWebSocketConnection connection, ChannelWriter<byte[]> queue, SemaphoreSlim requestPlaces, CancellationToken cancellationToken) {
+        if (requestPlaces.Wait(0)) {
+            if (queue.TryWrite(data)) {
+                return;
+            }
+            requestPlaces.Release();
         }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(_options.RequestQueueTimeout);
         try {
-            await queue.WriteAsync(data, timeout.Token);
+            await requestPlaces.WaitAsync(timeout.Token);
+            try {
+                await queue.WriteAsync(data, timeout.Token);
+            } catch {
+                requestPlaces.Release();
+                throw;
+            }
         } catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) {
             var input = await ReadMessageAsync(data, connection, cancellationToken);
             if (input is not null) {
@@ -309,7 +326,8 @@ internal sealed class WebSocketHandler(
         WebSocketConnection connection,
         List<Task> tasks,
         CancellationTokenSource requests,
-        Task? reader
+        Task? reader,
+        SemaphoreSlim requestPlaces
     ) {
         // Close first, so a ConnectionStorage.Add racing with removal sees a closed connection and ignores it.
         connection.BeginClosing();
@@ -354,10 +372,10 @@ internal sealed class WebSocketHandler(
             tasks.Add(reader);
         }
 
-        _ = DisposeWhenCompletedAsync(Task.WhenAll(tasks), connection, requests);
+        _ = DisposeWhenCompletedAsync(Task.WhenAll(tasks), connection, requests, requestPlaces);
     }
 
-    private async Task DisposeWhenCompletedAsync(Task tasks, WebSocketConnection connection, CancellationTokenSource requests) {
+    private async Task DisposeWhenCompletedAsync(Task tasks, WebSocketConnection connection, CancellationTokenSource requests, SemaphoreSlim requestPlaces) {
         try {
             await tasks;
         } catch (Exception error) {
@@ -368,6 +386,7 @@ internal sealed class WebSocketHandler(
             } catch (Exception error) {
                 Log.DisposalFailed(logger, error);
             } finally {
+                requestPlaces.Dispose();
                 requests.Dispose();
             }
         }

@@ -77,19 +77,7 @@ public sealed class WebSocketConnection(
 
                 if (stream.Length + result.Count > _maxMessageSizeBytes) {
                     const string reason = "Message size limit exceeded";
-                    using var closeTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    closeTimeout.CancelAfter(SendTimeout);
-                    try {
-                        await _sendLock.WaitAsync(closeTimeout.Token);
-                        try {
-                            await WebSocket.CloseOutputAsync(WebSocketCloseStatus.MessageTooBig, reason, closeTimeout.Token);
-                        } finally {
-                            _sendLock.Release();
-                        }
-                    } catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested) {
-                        WebSocket.Abort();
-                        throw new TimeoutException("WebSocket close output timed out", error);
-                    }
+                    await CloseOutputAsync(WebSocketCloseStatus.MessageTooBig, reason, cancellationToken);
 
                     return new ReceivedMessage(new WebSocketReceiveResult(
                         0, WebSocketMessageType.Close, true, WebSocketCloseStatus.MessageTooBig, reason
@@ -154,6 +142,32 @@ public sealed class WebSocketConnection(
                 }
             } finally {
                 _sendLock.Release();
+            }
+        } finally {
+            EndOperation();
+        }
+    }
+
+    internal async Task CloseOutputAsync(WebSocketCloseStatus status, string reason, CancellationToken cancellationToken) {
+        BeginClosing();
+        if (!TryBeginOperation(allowClosing: true)) {
+            return;
+        }
+        try {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(SendTimeout);
+            try {
+                await _sendLock.WaitAsync(timeout.Token);
+                try {
+                    if (WebSocket.State is WebSocketState.Open or WebSocketState.CloseReceived) {
+                        await WebSocket.CloseOutputAsync(status, reason, timeout.Token);
+                    }
+                } finally {
+                    _sendLock.Release();
+                }
+            } catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested) {
+                WebSocket.Abort();
+                throw new TimeoutException("WebSocket close output timed out", error);
             }
         } finally {
             EndOperation();

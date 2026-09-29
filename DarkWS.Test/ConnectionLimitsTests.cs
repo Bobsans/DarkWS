@@ -169,6 +169,37 @@ public sealed class ConnectionLimitsTests {
         await accept.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
+    [TestCase("logout", "logout:success")]
+    [TestCase("auth:token", "auth:failed")]
+    public async Task CommandAtFullRequestQueueDoesNotBlockPing(string command, string reply) {
+        await using var provider = CreateProvider(options => {
+            options.MaxConcurrentRequestsPerConnection = 1;
+            options.RequestQueueTimeout = TimeSpan.FromMilliseconds(100);
+        });
+        var probe = provider.GetRequiredService<RequestProbe>();
+        var socket = new TestWebSocket();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(
+            new WebSocketConnection(socket, new DefaultHttpContext { RequestServices = provider }, null), cancellation.Token);
+        try {
+            socket.EnqueueReceive("""{"id":"1","action":"limits:slow"}""");
+            socket.EnqueueReceive("""{"id":"2","action":"limits:slow"}""");
+            await UntilAsync(() => probe.Started == 1 && socket.ReceiveCount == 3);
+            socket.EnqueueReceive(command);
+            socket.EnqueueReceive("ping");
+            await UntilAsync(() => socket.Sent.Count > 0, 1000);
+            Assert.That(socket.Sent.Select(Encoding.UTF8.GetString), Is.EqualTo(new[] { "pong" }));
+            Assert.That(probe.Started, Is.EqualTo(1));
+            probe.Release.TrySetResult();
+            await UntilAsync(() => socket.Sent.Count == 4);
+            Assert.That(socket.Sent.Select(Encoding.UTF8.GetString), Is.EquivalentTo(new[] { "pong", "{\"id\":\"1\"}", "{\"id\":\"2\"}", reply }));
+        } finally {
+            probe.Release.TrySetResult();
+            cancellation.Cancel();
+            await accept.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
     [Test]
     public async Task CommandsWaitForAQueuePlaceInsteadOfBeingRejected() {
         await using var provider = CreateProvider(options => {
@@ -192,15 +223,93 @@ public sealed class ConnectionLimitsTests {
         await accept.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
+    [TestCase("logout", false)]
+    [TestCase("auth:token", false)]
+    [TestCase("logout", true)]
+    public async Task CommandFloodClosesWithPolicyViolationAndBoundedOutput(string command, bool blockClose) {
+        await using var provider = CreateProvider(options => options.MaxConcurrentRequestsPerConnection = 1);
+        var probe = provider.GetRequiredService<RequestProbe>();
+        var socket = new TestWebSocket();
+        var connection = new WebSocketConnection(socket, new DefaultHttpContext { RequestServices = provider }, null) {
+            SendTimeout = TimeSpan.FromMilliseconds(100)
+        };
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(connection, cancellation.Token);
+        try {
+            socket.EnqueueReceive("""{"id":"1","action":"limits:slow"}""");
+            socket.EnqueueReceive("""{"id":"2","action":"limits:slow"}""");
+            await UntilAsync(() => probe.Started == 1 && socket.ReceiveCount == 3);
+            for (var index = 0; index < 4; index++) {
+                socket.EnqueueReceive(command);
+            }
+            socket.EnqueueReceive("ping");
+            await UntilAsync(() => socket.Sent.Count > 0, 1000);
+            Assert.That(socket.Sent.Select(Encoding.UTF8.GetString), Is.EqualTo(new[] { "pong" }));
+            Assert.That(connection.IsOpen, Is.True);
+            if (blockClose) {
+                socket.CloseBarrier = new TaskCompletionSource().Task;
+            }
+            socket.EnqueueReceive(command);
+            await accept.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.That(socket.LastOutputCloseStatus, Is.EqualTo(blockClose ? null : (WebSocketCloseStatus?)WebSocketCloseStatus.PolicyViolation));
+            Assert.That(socket.WasAborted, Is.EqualTo(blockClose));
+            Assert.That(probe.Active, Is.Zero);
+            Assert.That(socket.WasDisposed, Is.True);
+            Assert.That(provider.GetRequiredService<ConnectionStorage>().GetAll(), Is.Empty);
+        } finally {
+            probe.Release.TrySetResult();
+            cancellation.Cancel();
+            await accept.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
     [Test]
-    public async Task SaturatedConnectionSurvivesTransportKeepAlive() {
+    public async Task RequestTimesOutWhenCommandsFillSharedQueue() {
+        await using var provider = CreateProvider(options => {
+            options.MaxConcurrentRequestsPerConnection = 2;
+            options.RequestQueueTimeout = TimeSpan.FromMilliseconds(100);
+        });
+        var probe = provider.GetRequiredService<RequestProbe>();
+        var socket = new TestWebSocket();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(
+            new WebSocketConnection(socket, new DefaultHttpContext { RequestServices = provider }, null), cancellation.Token);
+        try {
+            for (var id = 1; id <= 3; id++) {
+                socket.EnqueueReceive($$"""{"id":"{{id}}","action":"limits:slow"}""");
+            }
+            await UntilAsync(() => probe.Started == 2 && socket.ReceiveCount == 4);
+            // One queued request and five commands fill capacity 2 + 4, leaving one request permit unused.
+            for (var index = 0; index < 5; index++) {
+                socket.EnqueueReceive("logout");
+            }
+            socket.EnqueueReceive("ping");
+            await UntilAsync(() => socket.Sent.Count > 0, 1000);
+            socket.EnqueueReceive("""{"id":"4","action":"limits:slow"}""");
+            await UntilAsync(() => socket.Sent.Count == 2);
+            Assert.That(socket.Sent.Select(Encoding.UTF8.GetString), Is.EqualTo(new[] { "pong", "{\"id\":\"4\",\"error\":\"darkws:error:busy\"}" }));
+            probe.Release.TrySetResult();
+            await UntilAsync(() => socket.Sent.Count == 10);
+            Assert.That(probe.Started, Is.EqualTo(3));
+            Assert.That(probe.Peak, Is.LessThanOrEqualTo(2));
+        } finally {
+            probe.Release.TrySetResult();
+            cancellation.Cancel();
+            await accept.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [TestCase(null)]
+    [TestCase("logout")]
+    [TestCase("auth:token")]
+    public async Task SaturatedConnectionSurvivesTransportKeepAlive(string? command) {
         using var host = await new HostBuilder().ConfigureWebHost(builder => builder
             .UseKestrel(options => options.Listen(IPAddress.Loopback, 0))
             .ConfigureServices(services => {
                 services.AddRouting();
                 services.AddSingleton<RequestProbe>();
                 services.AddScoped<SlowHandler>();
-                // On .NET 9+ an unprocessed keep-alive PONG aborts after 600 ms, well inside the 1 s saturation.
+                // On .NET 9+ an unprocessed keep-alive PONG aborts after 600 ms, inside the 1.5 s saturation.
                 services.AddDarkWs(options => {
                     options.MaxConcurrentRequestsPerConnection = 1;
                     options.RequestQueueTimeout = TimeSpan.FromMilliseconds(100);
@@ -221,14 +330,21 @@ public sealed class ConnectionLimitsTests {
             await socket.SendTextAsync($$"""{"id":"{{id}}","action":"limits:slow"}""");
         }
 
-        _ = Task.Delay(TimeSpan.FromSeconds(1)).ContinueWith(_ => host.Services.GetRequiredService<RequestProbe>().Release.TrySetResult(), TaskScheduler.Default);
+        if (command is not null) {
+            await socket.SendTextAsync(command);
+        }
+        _ = Task.Delay(TimeSpan.FromSeconds(1.5)).ContinueWith(_ => host.Services.GetRequiredService<RequestProbe>().Release.TrySetResult(), TaskScheduler.Default);
         var replies = new List<string>();
         // A pending receive also answers the server's keep-alive PINGs on this side.
-        while (replies.Count < 3) {
+        while (replies.Count < (command is null ? 3 : 4)) {
             replies.Add(Encoding.UTF8.GetString(await socket.ReceiveRawMessage()));
         }
 
-        Assert.That(replies, Is.EqualTo(["{\"id\":\"3\",\"error\":\"darkws:error:busy\"}", "{\"id\":\"1\"}", "{\"id\":\"2\"}"]));
+        var expected = new List<string> { "{\"id\":\"3\",\"error\":\"darkws:error:busy\"}", "{\"id\":\"1\"}", "{\"id\":\"2\"}" };
+        if (command is not null) {
+            expected.Add(command == "logout" ? "logout:success" : "auth:failed");
+        }
+        Assert.That(replies, Is.EqualTo(expected));
         await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
         await host.StopAsync();
     }
@@ -351,8 +467,8 @@ public sealed class ConnectionLimitsTests {
         return provider;
     }
 
-    private static async Task UntilAsync(Func<bool> condition) {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+    private static async Task UntilAsync(Func<bool> condition, int timeoutMilliseconds = 5000) {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMilliseconds));
         while (!condition()) {
             await Task.Delay(10, timeout.Token);
         }

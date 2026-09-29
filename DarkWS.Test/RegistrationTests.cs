@@ -24,11 +24,21 @@ public sealed class RegistrationTests {
 
     [TestCase(0)]
     [TestCase(-1)]
+    [TestCase(int.MaxValue)]
+    [TestCase(int.MaxValue - 3)]
     public void InvalidConcurrencyLimitFailsWhenOptionsAreResolved(int limit) {
         var services = new ServiceCollection();
         services.AddDarkWs(options => options.MaxConcurrentRequestsPerConnection = limit);
         using var provider = services.BuildServiceProvider();
         Assert.Throws<OptionsValidationException>(() => _ = provider.GetRequiredService<IOptions<DarkWsOptions>>().Value);
+    }
+
+    [Test]
+    public void LargestConcurrencyLimitLeavesRoomForCommandReserve() {
+        var services = new ServiceCollection();
+        services.AddDarkWs(options => options.MaxConcurrentRequestsPerConnection = int.MaxValue - 4);
+        using var provider = services.BuildServiceProvider();
+        Assert.That(provider.GetRequiredService<IOptions<DarkWsOptions>>().Value.MaxConcurrentRequestsPerConnection, Is.EqualTo(int.MaxValue - 4));
     }
 
     [TestCase(nameof(DarkWsOptions.KeepAliveInterval))]

@@ -150,16 +150,20 @@ builder.Services.AddDarkWs(options => {
 });
 ```
 
-These are the defaults. The request limit must be positive. Up to that many
-requests run at once and as many more wait in arrival order, together with
-`auth:`/`logout` commands, while the socket keeps being read: text `ping` is
-answered at once and transport PONGs are processed even when every slot is busy.
-When the queue is full, reading waits for a free place for at most
-`RequestQueueTimeout`; then that request is answered with `BusyError`
-(`darkws:error:busy`) and reading continues. Commands wait for a place instead.
+These are the defaults. The request limit must be between 1 and `int.MaxValue - 4`.
+Up to that many requests run at once and as many ordinary requests wait in FIFO
+order. The shared queue has four extra places reserved for `auth:`/`logout`.
+Commands keep their order relative to requests and enter the queue without
+waiting, so a pending command does not stop text `ping` or transport PONG reads.
+If a command arrives when the shared queue is full, the server closes the
+connection with status 1008 (Policy Violation).
+An ordinary request can pause reading while waiting for a request place or shared
+queue space, for at most `RequestQueueTimeout`; on timeout it receives `BusyError`
+(`darkws:error:busy`) and reading continues.
 Keep `RequestQueueTimeout` below `KeepAliveTimeout` and the clients' pong timeouts.
-A saturated connection therefore holds up to twice the request limit in messages,
-each at most `MaxMessageSizeBytes`; size both limits for the expected connection count.
+The waiting queue holds at most the request limit plus four messages. Budget also
+for running requests and messages currently being received or dispatched, each
+subject to `MaxMessageSizeBytes`; size the limits for the expected connection count.
 Responses may arrive out of order; correlate them by `id`. The host application or reverse proxy
 must enforce a total concurrent connection limit and any per-user/IP limits;
 DarkWS only bounds requests within each connection.

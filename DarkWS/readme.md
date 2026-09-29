@@ -67,12 +67,17 @@ services.AddDarkWs(options => options.MaxMessageSizeBytes = 256 * 1024);
 
 ## Request concurrency and liveness
 
-`MaxConcurrentRequestsPerConnection` defaults to 16 and must be positive. Up to
-that many requests run and as many more wait in order while the socket keeps
-being read, so `ping` and transport PONGs are handled even at capacity. A request
-that finds the queue full for `RequestQueueTimeout` (5 seconds) receives
-`BusyError` (`darkws:error:busy`); keep it below `KeepAliveTimeout` and client
-pong timeouts. Responses can arrive out of order and use `id` for correlation.
+`MaxConcurrentRequestsPerConnection` defaults to 16 and must be between 1 and
+`int.MaxValue - 4`. Up to that many requests run and as many ordinary requests wait
+in FIFO order. The shared queue has four additional places reserved for
+`auth:`/`logout`, so a queued command does not stop reading `ping` or transport
+PONGs. Commands keep their order relative to requests; if one arrives at a full
+shared queue, the connection closes with status 1008 (Policy Violation).
+Ordinary requests can pause reads while waiting for a request place or shared
+queue space. After `RequestQueueTimeout` (5 seconds) they receive `BusyError`
+(`darkws:error:busy`), and reading continues. Keep that timeout below
+`KeepAliveTimeout` and client pong timeouts. Responses can arrive out of order and
+use `id` for correlation.
 The host or reverse proxy must enforce total connection and per-user/IP limits.
 
 Set `RunActionsOnThreadPool = true` (default `false`) to prevent synchronous

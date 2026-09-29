@@ -63,6 +63,10 @@ include migration guidance before a release is published.
 
 ### Changed
 
+- A command arriving at a full shared connection queue closes the socket with
+  status 1008 (Policy Violation), instead of indefinitely blocking reads.
+  `MaxConcurrentRequestsPerConnection` must leave room for four reserved command
+  places and is now limited to `int.MaxValue - 4`.
 - Browser client `authenticate("")` rejects immediately with `TypeError` without
   connecting, sending, or joining the control-command queue. Use `logout()` to
   sign out.
@@ -84,6 +88,11 @@ include migration guidance before a release is published.
 
 ### Migration
 
+- Avoid flooding a connection with `auth:`/`logout`: the shared FIFO now reserves
+  four extra command places and closes with 1008 when a command cannot enter it.
+  Ordinary requests retain their existing queue limit and `RequestQueueTimeout`.
+  Commands still execute after earlier requests; the reserve keeps the reader
+  available for heartbeat traffic rather than prioritizing authentication.
 - Browser control commands now use `controlTimeout` (30 seconds) rather than
   `requestTimeout` (5 minutes by default). Set `controlTimeout` to the old
   `requestTimeout` value to preserve the previous deadline. Replace

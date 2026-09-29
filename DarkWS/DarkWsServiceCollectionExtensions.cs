@@ -23,7 +23,8 @@ public static class DarkWsServiceCollectionExtensions {
         }
 
         options.Validate(value => value.MaxMessageSizeBytes > 0, "MaxMessageSizeBytes must be positive")
-            .Validate(value => value.MaxConcurrentRequestsPerConnection > 0, "MaxConcurrentRequestsPerConnection must be positive")
+            .Validate(value => value.MaxConcurrentRequestsPerConnection is > 0 and <= int.MaxValue - WebSocketHandler.CommandReserve,
+                "MaxConcurrentRequestsPerConnection must be positive and leave capacity for four reserved command places")
             .Validate(value => IsValidTimeout(value.KeepAliveInterval), "KeepAliveInterval must be a positive timer duration")
             .Validate(value => IsValidTimeout(value.KeepAliveTimeout), "KeepAliveTimeout must be a positive timer duration")
             .Validate(value => IsValidTimeout(value.ReceiveIdleTimeout), "ReceiveIdleTimeout must be a positive timer duration")
