@@ -32,10 +32,13 @@ broadcast `{ id: "@", action, data? }`. Update the server and clients together:
 the previous `payload` request field and nested broadcast envelope are incompatible.
 
 `authenticate(token)` waits for a server acknowledgement and rejects authentication
-errors; `logout()` clears the current server session without closing the connection.
+errors. `authenticate("")` rejects immediately with `TypeError`, without connecting
+or sending a command. Use `logout()` to sign out: it clears the current server
+session without closing the connection.
 They send plain text `auth:<token>` / `logout` and wait for `auth:success` /
-`logout:success`. `auth:failed` rejects with `ErrorResponse` and clears the server
-session. System commands run sequentially; a response timeout closes the socket
+`logout:success`. `auth:failed` rejects with `ErrorResponse`; the server clears the
+session by default, or retains it with `KeepSessionOnFailedAuthentication`.
+System commands run sequentially; a response timeout closes the socket
 and rejects queued commands so late replies cannot confirm a later command.
 The `send` event and error request context contain local metadata without the token;
 their local ids are not sent on the wire. JSON replies cannot acknowledge these commands.
@@ -73,6 +76,17 @@ disables expiry; the request remains pending until a response, disconnect, or
 disposal. Ping starts only on a successful connection; constructing a client
 starts no timers. Error responses reject whenever the `error` field is present,
 even when it is empty. Request ids `@` and `@auth` are reserved for server messages.
+
+`controlTimeout` independently bounds replies to `authenticate()` and `logout()`,
+including automatic session restoration via `authenticationToken`. It defaults to
+30000 ms (30 seconds), starts after each command is sent, and excludes connection
+and command-queue waits. Set it to `0` to disable control reply timeouts. A timeout
+rejects with `RequestTimeoutError`, closes the socket, and rejects queued commands
+with `ConnectionClosedError` so a late reply cannot acknowledge the wrong command.
+`requestTimeout` still applies only to ordinary requests. To retain the previous
+control timeout, explicitly set `controlTimeout` to your old `requestTimeout`
+value (300000 ms by default). An empty `authenticationToken` provider result still
+skips session restoration and connects anonymously.
 
 Text `ping` is sent every `pingInterval` (30 seconds; the older `pingTimeout`
 name is still accepted). When no `pong` arrives within `pongTimeout` (30 seconds,

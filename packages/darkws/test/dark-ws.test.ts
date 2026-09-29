@@ -394,12 +394,22 @@ describe("DarkWs", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("waits for authentication acknowledgement", async () => {
+  it("rejects an empty token without connecting or queuing a command", async () => {
+    const client = createClient();
+    await expect(client.authenticate("")).rejects.toBeInstanceOf(TypeError);
+    expect(MockWebSocket.instances).toHaveLength(0);
+    expect(client.pendingRequestCount).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    client.dispose();
+  });
+
+  it("waits for authentication acknowledgement without an empty token disturbing the command", async () => {
     const client = createClient().connect();
     const socket = MockWebSocket.instances[0];
     socket.open();
     const authenticated = client.authenticate("test-token");
     await vi.advanceTimersByTimeAsync(0);
+    await expect(client.authenticate("")).rejects.toBeInstanceOf(TypeError);
     expect(client.pendingRequestCount).toBe(1);
     expect(socket.sent).toEqual(["auth:test-token"]);
     socket.serverText("auth:success");
@@ -428,7 +438,7 @@ describe("DarkWs", () => {
   });
 
   it("bounds authentication waits and rejects logout on disconnect", async () => {
-    const client = createClient({ requestTimeout: 10 }).connect();
+    const client = createClient({ controlTimeout: 10 }).connect();
     const socket = MockWebSocket.instances[0];
     socket.open();
     const authentication = expect(client.authenticate("test-token")).rejects.toBeInstanceOf(RequestTimeoutError);
@@ -446,6 +456,78 @@ describe("DarkWs", () => {
     next.serverClose();
     await logout;
     expect(client.pendingRequestCount).toBe(0);
+    client.dispose();
+  });
+
+  it.each([
+    ["authenticate", {}],
+    ["logout", {}],
+    ["authenticate", { controlTimeout: undefined }],
+  ] as const)("uses a separate 30-second default deadline for %s with %j", async (command, options) => {
+    const client = createClient({ requestTimeout: 10, pingInterval: 60000, ...options }).connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    const ordinary = expect(client.request("read")).rejects.toBeInstanceOf(RequestTimeoutError);
+    const control = command === "authenticate" ? client.authenticate("token") : client.logout();
+    const rejected = expect(control).rejects.toBeInstanceOf(RequestTimeoutError);
+    await vi.advanceTimersByTimeAsync(10);
+    await ordinary;
+    expect(client.pendingRequestCount).toBe(1);
+    await vi.advanceTimersByTimeAsync(29989);
+    expect(socket.readyState).toBe(MockWebSocket.OPEN);
+    expect(client.pendingRequestCount).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED);
+    expect(client.pendingRequestCount).toBe(0);
+    client.dispose();
+  });
+
+  it("starts a queued logout deadline only when it is sent", async () => {
+    const client = createClient({ controlTimeout: 10 }).connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    const auth = client.authenticate("token");
+    const logout = expect(client.logout()).rejects.toBeInstanceOf(RequestTimeoutError);
+    await vi.advanceTimersByTimeAsync(9);
+    expect(socket.sent).toEqual(["auth:token"]);
+    socket.serverText("auth:success");
+    await auth;
+    await vi.advanceTimersByTimeAsync(9);
+    expect(socket.sent).toEqual(["auth:token", "logout"]);
+    expect(socket.readyState).toBe(MockWebSocket.OPEN);
+    await vi.advanceTimersByTimeAsync(1);
+    await logout;
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED);
+    expect(client.pendingRequestCount).toBe(0);
+    client.dispose();
+  });
+
+  it.each(["authenticate", "logout"] as const)("disables the %s deadline with controlTimeout zero", async command => {
+    const client = createClient({ controlTimeout: 0, requestTimeout: 10, pingInterval: 60000 }).connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    const control = command === "authenticate" ? client.authenticate("token") : client.logout();
+    await vi.advanceTimersByTimeAsync(30001);
+    expect(socket.readyState).toBe(MockWebSocket.OPEN);
+    expect(client.pendingRequestCount).toBe(1);
+    socket.serverText(command === "authenticate" ? "auth:success" : "logout:success");
+    await expect(control).resolves.toBeUndefined();
+    expect(client.pendingRequestCount).toBe(0);
+    client.dispose();
+  });
+
+  it("uses controlTimeout for automatic session restoration", async () => {
+    const client = createClient({ controlTimeout: 10, authenticationToken: () => "token" }).connect();
+    const socket = MockWebSocket.instances[0];
+    const opened = vi.fn();
+    client.on("open", opened);
+    socket.open();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(socket.sent).toEqual(["auth:token"]);
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED);
+    expect(client.pendingRequestCount).toBe(0);
+    expect(opened).not.toHaveBeenCalled();
     client.dispose();
   });
 
@@ -551,8 +633,8 @@ describe("DarkWs", () => {
     await anonymous;
   });
 
-  it("connects without authentication when the provider has no token", async () => {
-    const client = createClient({ authenticationToken: () => undefined }).connect();
+  it.each([undefined, null, ""])("connects without authentication when the provider returns %j", async token => {
+    const client = createClient({ authenticationToken: () => token }).connect();
     const socket = MockWebSocket.instances[0];
     const request = client.request<number>("public");
     socket.open();

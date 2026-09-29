@@ -415,6 +415,15 @@ client.dispose();
 `dispose()` is terminal: it stops reconnect and ping timers, closes the socket,
 and rejects pending requests.
 
+`authenticate("")` rejects immediately with `TypeError` without connecting or
+sending anything; use `logout()` to sign out. `controlTimeout` sets an independent
+reply deadline for authentication, logout, and automatic session restoration:
+30000 ms by default, or `0` to disable it. Each deadline starts after that command
+is sent, excluding connection and command-queue waits. Expiry rejects with
+`RequestTimeoutError`, closes the socket, and rejects queued commands with
+`ConnectionClosedError`. Set `controlTimeout` explicitly to your previous
+`requestTimeout` value if you need to preserve the old control-command deadline.
+
 Connection waits resolve on `open` and have a separate `waitConnectionTimeout`
 (30 seconds by default). The response `requestTimeout` starts only after sending
 (5 minutes by default), so a call can take up to the sum of the two timeouts.

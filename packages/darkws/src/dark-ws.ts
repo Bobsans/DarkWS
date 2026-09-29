@@ -15,6 +15,8 @@ export interface DarkWsOptions {
   beforeConnect?: () => Promise<unknown>;
   authenticationToken?: () => string | null | undefined | Promise<string | null | undefined>;
   requestTimeout?: number;
+  /** Reply timeout for authentication and logout, including session restore. Default 30000 ms; 0 disables it. */
+  controlTimeout?: number;
   reconnect?: boolean;
   reconnectTimeout?: number;
   /** Retry a pending automatic reconnect immediately when the document becomes visible. Default false. */
@@ -103,7 +105,7 @@ export default class DarkWs {
   private controlRequest?: RequestResolver;
   private readonly connectionWaiters = new Set<ConnectionWaiter>();
   private readonly options: Required<Pick<DarkWsOptions,
-    "reconnect" | "reconnectTimeout" | "requestTimeout" | "pongTimeout" |
+    "reconnect" | "reconnectTimeout" | "requestTimeout" | "controlTimeout" | "pongTimeout" |
     "waitConnectionTimeout" | "debug">> & DarkWsOptions;
   private readonly pingInterval: number;
   private socket?: WebSocket;
@@ -132,6 +134,7 @@ export default class DarkWs {
       waitConnectionTimeout: 30000,
       debug: false,
       ...options,
+      controlTimeout: options.controlTimeout ?? 30000,
     };
     this.pingInterval = options.pingInterval ?? options.pingTimeout ?? 30000;
     if (options.reconnectOnVisible && typeof document !== "undefined") {
@@ -244,6 +247,7 @@ export default class DarkWs {
   }
 
   public authenticate(token: string): Promise<void> {
+    if (token === "") return Promise.reject(new TypeError("Token must not be empty; use logout() to sign out"));
     return this.systemRequest("auth", "auth:" + token);
   }
 
@@ -263,7 +267,7 @@ export default class DarkWs {
         reject,
       };
       this.requests.set(resolver.request.id, resolver);
-      void this.sendRequest(resolver, undefined, { text, previous, socket });
+      void this.sendRequest(resolver, this.options.controlTimeout, { text, previous, socket });
     });
     if (!socket) this.controlTail = result.catch(() => {});
     return result;

@@ -8,6 +8,9 @@ include migration guidance before a release is published.
 
 ### Added
 
+- Browser client `controlTimeout` independently limits authentication/logout
+  replies, including automatic session restore. Default 30 seconds; `0` disables
+  the deadline, which starts when each command is sent.
 - Browser client `isCurrentSocket(event)` identifies native events from the
   currently assigned socket without changing event payloads. Opt-in
   `reconnectOnVisible` skips pending reconnect backoff when the tab becomes
@@ -49,6 +52,9 @@ include migration guidance before a release is published.
 
 ### Changed
 
+- Browser client `authenticate("")` rejects immediately with `TypeError` without
+  connecting, sending, or joining the control-command queue. Use `logout()` to
+  sign out.
 - Authenticator exceptions during upgrade are logged and return HTTP 401 instead
   of escaping as server errors. Request/shutdown cancellation is propagated.
 - AUD-03: The server keeps reading a saturated connection. Up to
@@ -67,6 +73,11 @@ include migration guidance before a release is published.
 
 ### Migration
 
+- Browser control commands now use `controlTimeout` (30 seconds) rather than
+  `requestTimeout` (5 minutes by default). Set `controlTimeout` to the old
+  `requestTimeout` value to preserve the previous deadline. Replace
+  `authenticate("")` calls with `logout()`; empty automatic token-provider results
+  still skip authentication.
 - To accept anonymous connections after upgrade authenticator exceptions, opt into
   `AcceptAnonymousOnUpgradeAuthenticationException`. Normal null results still allow
   anonymous upgrade. Enable `KeepSessionOnFailedAuthentication` only when the host
