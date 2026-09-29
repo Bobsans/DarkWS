@@ -56,8 +56,32 @@ include migration guidance before a release is published.
   and `KeepSessionOnFailedAuthentication` (default false). Failed `auth:` commands
   can retain the current session, principal, and indexes without a lifecycle hook;
   the response stays `auth:failed`, and explicit logout always clears the session.
-- Group broadcast connection/session exclusions and `BroadcastToGroupsAsync` on
-  `IBroadcaster` and `HandlerBase`, with one publication and deduplicated recipients.
+- `PublishAsync(BroadcastTarget, action[, data][, cancellationToken])` on
+  `IBroadcaster` and `HandlerBase`. `BroadcastTarget` selects `All`, a
+  `Connection`, `Session`, `Group`, or a `Groups` union published once with
+  deduplicated recipients; group targets take `ExceptConnection`/`ExceptSession`.
+  New recipient options extend the target instead of adding broadcaster overloads.
+  `HandlerBase.Self` selects the calling connection.
+- Action filters (#8): `DarkWsBuilder.AddActionFilter<TFilter>()` registers scoped
+  `IDarkWsActionFilter` implementations that run in registration order around the
+  bound handler; a filter may return its own `IResponse` or catch the handler's
+  exception. `DarkWsActionContext` carries the action metadata, `RequestId`, the
+  deserialized `Payload` and the received `RawPayload`, the captured `Session`, the
+  message `Services`, and the `CancellationToken`.
+- Request filters: `DarkWsBuilder.AddRequestFilter<TFilter>()` registers scoped
+  `IDarkWsRequestFilter` implementations that wrap every well-formed request,
+  including unknown actions, missing authorization, and invalid payloads (seen as
+  `ErrorResponse` results) and failing scope initializers (seen as exceptions).
+  `DarkWsRequestContext` carries `RequestId`, the client's `ActionName`, the
+  registered `Action` or null, `RawPayload`, `Session`, `Services`, and the token.
+  Malformed JSON and busy rejections do not reach request filters.
+- `DarkWsActionInfo` describes a registered action: `Name`, `HandlerType`, `Method`,
+  method `Attributes`, and `HandlerAttributes` from the handler class, both collected
+  once at registration. `IDarkWsContextAccessor.Action` exposes it to scope
+  initializers and scoped services, and is null in connection lifecycle hooks.
+- `HandlerBase.Services` is the current message scope's service provider.
+- `ErrorResponse.Error` and `ErrorResponse<T>.Error` expose the error code, so filters
+  can classify outcomes.
 - `DarkWS.Testing`: direct handler context initialization, captured responses and
   targeted broadcasts, and registered action invocation through the server pipeline
   without sockets. `HandlerBase` no longer depends on the connection dispatcher;
@@ -81,6 +105,30 @@ include migration guidance before a release is published.
 
 ### Changed
 
+- Local broadcast delivery shares one `BroadcastSendTimeout` deadline per message
+  instead of a linked token source and timer per recipient. Every send still starts
+  at once and times out after the same interval. In the in-memory fanout benchmark
+  (.NET 10, 1000 recipients) allocation per publication drops from about 156 KB to
+  12 KB and time from 0.47 ms to 0.14 ms.
+- Breaking: `IWebSocketConnection` keeps only the members applications and test
+  doubles use: `Id`, `HttpContext`, `Session`, `IsOpen`, `SendAsync`, `CloseAsync`,
+  `Abort`, and `Dispose`. `SendAsync` takes `ReadOnlyMemory<byte>`; `WebSocket` and
+  `ReceiveMessageAsync` are removed, and `Abort` has no default implementation.
+- Breaking: `DarkWsMiddleware` is renamed `DarkWsConnectionHooks` and is registered
+  with `DarkWsBuilder.AddConnectionHooks<T>()`. Assembly scanning registers only handlers.
+- Breaking: Redis is registered with `DarkWsBuilder.AddRedis(channel)` from
+  `DarkWsRedisBuilderExtensions`, replacing `services.AddDarkWsRedis(channel)`.
+- Breaking: `PublishAsync` replaces `BroadcastAsync`, `BroadcastToConnectionAsync`,
+  `BroadcastToSessionAsync`, and `BroadcastToGroupAsync` on `IBroadcaster` and
+  `HandlerBase`, and `HandlerBase.BroadcastToSelfAsync`; the old methods are removed.
+  `PublishAsync` rejects a blank action and an already cancelled token before
+  publishing, for every target. Wire envelopes are unchanged.
+- Breaking: the backplane envelope `DarkWsBroadcast` is renamed `BroadcastMessage` and its
+  selector enum `DarkWsTarget` is renamed `BroadcastTargetType`, including in
+  `IDarkWsBackplane` and `DarkWsTestHost.Broadcasts`. The envelope's `Target` and
+  `Groups` properties are renamed `TargetType` and `GroupNames` to match
+  `BroadcastTarget` (`Type`, `Id`, `GroupNames`, `Except`). Enum values, JSON field
+  names, and the Redis wire format are unchanged. This requires the next major version.
 - DWA-04: A repeated `AddAuthenticator` call throws `InvalidOperationException`
   before changing service registrations, including repeated calls with the same types.
 - DWA-02: Redis subscriptions run up to 16 concurrent broadcast deliveries, so one
@@ -111,14 +159,48 @@ include migration guidance before a release is published.
 - AUD-45: The published package list lives once, as `DarkWsPackages` in
   `Directory.Build.props`; package settings and the gate scripts read it.
 
-### Deprecated
+### Removed
 
-- DWA-05: `DarkWsOptions.AuthenticationFailedError` now produces an obsolete warning
-  and is excluded from options validation. It remains binary-compatible until removal
-  in the next major version; null, empty, or whitespace values no longer block startup.
+- DWA-05: `DarkWsOptions.AuthenticationFailedError`, unused since 4.0.
+- The obsolete static wrappers `Configuration` (`AddDarkWs`, `MapDarkWs`) and
+  `RedisConfiguration` (`AddDarkWsRedis`).
+- Public wire envelope records `InputMessage`, `OkMessage`, `ResponseMessage<T>`,
+  `ErrorMessage`, `ErrorMessage<T>`, `BroadcastActionMessage`, and
+  `BroadcastActionMessage<T>`, and the constant `DarkWsProtocol.LegacyAuthenticationId`,
+  are now internal. The JSON protocol and the reserved `@auth` request id are unchanged.
+- `WebSocketConnection`, `ReceivedMessage`, and `ConnectionStorage` are now internal.
+  The injected `IDarkWsConnections` replaces `ConnectionStorage` for lookups by id,
+  session, or group and for `Refresh(connection)`; applications no longer register
+  or remove connections directly.
 
 ### Migration
 
+- Handlers that keep running after `ConnectionAborted` and then read `HttpContext`,
+  `Items`, request headers, or `AspNetSession` must copy those values first; the
+  context now throws `ObjectDisposedException` after shutdown. `Session` is unaffected.
+- Replace `ConnectionStorage` with the injected `IDarkWsConnections`. Call
+  `Refresh(connection)` instead of `Add(connection)` after changing group membership,
+  and `Find(id)` instead of `GetByConnection(id)`. To test with fake recipients, use
+  `DarkWsTestHost.CreateConnection` from `DarkWS.Testing`.
+- Rename `DarkWsMiddleware` subclasses to derive from `DarkWsConnectionHooks` and
+  register each with `AddConnectionHooks<T>()`; they are no longer found by
+  `AddHandlersFromAssembly`.
+- Replace `services.AddDarkWsRedis(channel)` with `services.AddDarkWs().AddRedis(channel)`.
+- Custom `IWebSocketConnection` implementations remove `WebSocket` and
+  `ReceiveMessageAsync`, implement `Abort()`, and take `ReadOnlyMemory<byte>` in
+  `SendAsync`. Pass `new byte[] { ... }` or an array instead of a `[...]` literal.
+
+- Replace `BroadcastAsync(action, ...)` with `PublishAsync(BroadcastTarget.All, action, ...)`,
+  `BroadcastToConnectionAsync(id, ...)`, `BroadcastToSessionAsync(id, ...)`, and
+  `BroadcastToGroupAsync(group, ...)` with `PublishAsync(BroadcastTarget.Connection(id), ...)`,
+  `.Session(id)`, and `.Group(group)`, and `BroadcastToSelfAsync(...)` with
+  `PublishAsync(Self, ...)`. Pass a cancellation token positionally after the data,
+  or use the token-only overload. Custom `IBroadcaster` implementations implement the
+  two `PublishAsync` overloads with a cancellation token instead of the eight old methods.
+- Replace `DarkWsBroadcast` with `BroadcastMessage`, `DarkWsTarget` with
+  `BroadcastTargetType`, and the envelope's `Target`/`Groups` with `TargetType`/`GroupNames` in
+  custom backplanes and tests, then recompile: assemblies built against 4.x fail to
+  load these types. Nodes on 4.x and the new version still exchange Redis messages.
 - Browser applications with more than 256 simultaneous request/control calls must
   wait for capacity or explicitly increase `maxPendingRequests`. The value must be
   a positive safe integer; retry attempts retain the original call's slot.
@@ -127,6 +209,11 @@ include migration guidance before a release is published.
   last authenticator won while earlier typed-session factories remained registered.
 - Remove `AuthenticationFailedError` assignments and configuration entries. The option
   is unused; failed text authentication always replies `auth:failed`.
+- Replace `Configuration.AddDarkWs(services)`, `Configuration.MapDarkWs(endpoints)`, and
+  `RedisConfiguration.AddDarkWsRedis(services, channel)` with the extension calls
+  `services.AddDarkWs()`, `endpoints.MapDarkWs()`, and `services.AddDarkWs().AddRedis(channel)`.
+- Code that serialized or parsed the wire envelope types should use its own records
+  with the documented `id`, `action`, `data`, and `error` fields.
 - Redis consumers must not rely on publication order on one connection. Include
   application versions/sequences or refresh authoritative state when ordering
   matters. Bound publication rate and payload size: the 16-delivery limit does not
@@ -147,10 +234,8 @@ include migration guidance before a release is published.
   continues to enforce the retained session's expiry and revocation.
 - Upgrade all server and Redis packages sharing a channel before using group unions
   or exclusions. Their Groups=4 envelope adds `groups` and `except`; old nodes reject
-  it. Existing single-target messages are unchanged. Custom `IBroadcaster`
-  implementations must implement the new group-union methods to support them.
-  Use named `except:` and `cancellationToken:` arguments to distinguish exclusions,
-  data, and a `default` cancellation token when selecting overloads.
+  it. Existing single-target messages, including `PublishAsync` to a target without
+  exclusions, are unchanged.
 - AUD-03: Clients that pipeline many slow requests on one connection can now
   receive `darkws:error:busy`. Retry such requests, or raise
   `MaxConcurrentRequestsPerConnection` or `RequestQueueTimeout`, keeping the
@@ -182,8 +267,28 @@ include migration guidance before a release is published.
 - AUD-44: `SECURITY.md` describes private vulnerability reporting. Dependabot also
   proposes NuGet and npm updates, except for the published libraries' deliberate
   minimum dependency versions.
+- DWA-16 (#27): `DarkWsOptions.AllowedOrigins` restricts the DarkWS endpoint to listed
+  browser origins, compared case-insensitively, independently of
+  `WebSocketOptions.AllowedOrigins`. Other origins get 403 before the authenticator
+  runs; requests without `Origin` are accepted. The default empty list allows every origin.
+- DWA-11 (#30): CI and release checkouts no longer persist `GITHUB_TOKEN` in
+  `.git/config` while npm, NuGet restore, and tests run.
 
 ### Fixed
+
+- DWA-18 (#25): A .NET client `LogoutAsync` rejected by `MaxPendingRequests` no longer
+  disables the authentication token provider; only a started logout does.
+- DWA-08 (#24): When .NET client subscribers keep failing and an `Error` observer is
+  slow, at most `NotificationQueueCapacity` `Error` events wait and newer ones are
+  dropped, instead of queueing without bound. `StateChanged` events are not dropped.
+- DWA-09 (#26): After a connection has shut down, a handler that ignored cancellation
+  gets `ObjectDisposedException` from `HttpContext`, `AspNetSession`, and
+  `IWebSocketConnection.HttpContext` instead of reading the recycled context of a
+  finished request.
+- DWA-10, DWA-12 (#29): The package gate reads the npm tarball with .NET instead of
+  `tar`, which failed under Git for Windows, and tests the same Release build it packs.
+- DWA-14 (#31): The browser contract test fails instead of being skipped when the
+  Node.js tooling is missing and `CI=true`.
 
 - AUD-01: A request whose result cannot be serialized (reference cycle, unsupported
   type), whose action returns `null`, or whose custom `IResponse` fails before
@@ -204,7 +309,7 @@ include migration guidance before a release is published.
   recipients of the same broadcast. With the in-memory backplane, the publisher's cancellation token no longer
   cancels writes to other connections (which aborted their sockets) or skips the
   remaining recipients; an already cancelled token still prevents publishing.
-  `BroadcastAsync` still completes after local delivery, bounded by
+  Publishing (`PublishAsync` in 5.0) still completes after local delivery, bounded by
   `BroadcastSendTimeout`.
 - AUD-07: `OnCloseAsync` receives a context whose `ConnectionAborted` is the
   `ShutdownTimeout` deadline instead of the already cancelled handler token, so

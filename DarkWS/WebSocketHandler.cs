@@ -15,7 +15,7 @@ internal sealed class WebSocketHandler(
     DarkWsActionRegistry actions,
     ConnectionStorage storage,
     IBroadcaster broadcaster,
-    IEnumerable<DarkWsMiddleware> middlewares,
+    IEnumerable<DarkWsConnectionHooks> hooks,
     IOptions<DarkWsOptions> options,
     ILogger<WebSocketHandler> logger
 ) {
@@ -47,8 +47,8 @@ internal sealed class WebSocketHandler(
         Task? reader = null;
 
         try {
-            foreach (var middleware in middlewares) {
-                await middleware.OnOpenAsync(connectionContext);
+            foreach (var hook in hooks) {
+                await hook.OnOpenAsync(connectionContext);
             }
 
             reader = ReceiveAsync(connection, queue.Writer, requestPlaces, requests, cancellationToken);
@@ -220,45 +220,14 @@ internal sealed class WebSocketHandler(
         IServiceProvider services,
         CancellationToken cancellationToken
     ) {
-        if (!actions.TryGet(message.Action, out var action)) {
-            return new ErrorResponse(_options.InvalidActionError);
-        }
-
-        // The action keeps the session it was authorized with, even if auth:/logout arrives meanwhile.
-        if (!action.AllowAnonymous && session?.User.Identity?.IsAuthenticated != true) {
-            return new ErrorResponse(_options.AuthorizationRequiredError);
-        }
-
+        var action = actions.TryGet(message.Action, out var found) ? found : null;
+        var request = new DarkWsRequestContext(message.Id, message.Action, action?.Action, message.Payload, session, services, cancellationToken);
         var started = Stopwatch.GetTimestamp();
         try {
-            object? parameter;
-            try {
-                parameter = action.DeserializeParameter(message.Payload, _options.JsonOptions, _options.AllowNullPayloads);
-            } catch (Exception error) when (error is JsonException or NotSupportedException) {
-                Log.InvalidPayload(logger, message.Action, error);
-                return new ErrorResponse(_options.InvalidRequestError);
-            }
-
-            var context = services.GetRequiredService<DarkWsContextAccessor>();
-            context.Initialize(connection, cancellationToken, session, services, Broadcaster, action.Action);
-
-            foreach (var initializer in services.GetServices<IDarkWsScopeInitializer>()) {
-                await initializer.InitializeAsync(services, context, cancellationToken);
-            }
-
-            var filterContext = new DarkWsActionContext(action.Action, parameter, session, services, cancellationToken);
-
-            async ValueTask<IResponse> InvokeHandlerAsync() {
-                var handler = (HandlerBase)services.GetRequiredService(action.HandlerType);
-                handler.Initialize(context);
-                return await action.InvokeAsync(handler, parameter)
-                    ?? throw new InvalidOperationException($"Action {message.Action} returned no response");
-            }
-
-            Func<ValueTask<IResponse>> invoke = InvokeHandlerAsync;
-            foreach (var filter in services.GetServices<IDarkWsActionFilter>().Reverse()) {
+            Func<ValueTask<IResponse>> invoke = () => ExecuteAsync(request, action, connection);
+            foreach (var filter in services.GetServices<IDarkWsRequestFilter>().Reverse()) {
                 var next = invoke;
-                invoke = () => filter.InvokeAsync(filterContext, next);
+                invoke = () => filter.InvokeAsync(request, next);
             }
 
             var result = await invoke() ?? throw new InvalidOperationException($"Action {message.Action} returned no response");
@@ -282,6 +251,53 @@ internal sealed class WebSocketHandler(
 
             return new ErrorResponse(_options.RequestFailedError);
         }
+    }
+
+    // The innermost request stage: every outcome a request filter observes as a response or an exception.
+    private async ValueTask<IResponse> ExecuteAsync(DarkWsRequestContext request, ActionDescriptorBase? action, IWebSocketConnection connection) {
+        if (action is null) {
+            return new ErrorResponse(_options.InvalidActionError);
+        }
+
+        // The action keeps the session it was authorized with, even if auth:/logout arrives meanwhile.
+        var session = request.Session;
+        if (!action.AllowAnonymous && session?.User.Identity?.IsAuthenticated != true) {
+            return new ErrorResponse(_options.AuthorizationRequiredError);
+        }
+
+        object? parameter;
+        try {
+            parameter = action.DeserializeParameter(request.RawPayload, _options.JsonOptions, _options.AllowNullPayloads);
+        } catch (Exception error) when (error is JsonException or NotSupportedException) {
+            Log.InvalidPayload(logger, request.ActionName, error);
+            return new ErrorResponse(_options.InvalidRequestError);
+        }
+
+        var services = request.Services;
+        var cancellationToken = request.CancellationToken;
+        var context = services.GetRequiredService<DarkWsContextAccessor>();
+        context.Initialize(connection, cancellationToken, session, services, Broadcaster, action.Action);
+
+        foreach (var initializer in services.GetServices<IDarkWsScopeInitializer>()) {
+            await initializer.InitializeAsync(services, context, cancellationToken);
+        }
+
+        var filterContext = new DarkWsActionContext(request, action.Action, parameter);
+
+        async ValueTask<IResponse> InvokeHandlerAsync() {
+            var handler = (HandlerBase)services.GetRequiredService(action.HandlerType);
+            handler.Initialize(context);
+            return await action.InvokeAsync(handler, parameter)
+                ?? throw new InvalidOperationException($"Action {request.ActionName} returned no response");
+        }
+
+        Func<ValueTask<IResponse>> invoke = InvokeHandlerAsync;
+        foreach (var filter in services.GetServices<IDarkWsActionFilter>().Reverse()) {
+            var next = invoke;
+            invoke = () => filter.InvokeAsync(filterContext, next);
+        }
+
+        return await invoke() ?? throw new InvalidOperationException($"Action {request.ActionName} returned no response");
     }
 
     private async Task<bool> AuthenticateAsync(
@@ -317,8 +333,8 @@ internal sealed class WebSocketHandler(
         storage.SetSession(connection, session);
         connection.HttpContext.User = session?.User ?? new ClaimsPrincipal(new ClaimsIdentity());
         var context = CreateContext(connection, cancellationToken);
-        foreach (var middleware in middlewares) {
-            await middleware.OnAuthenticatedAsync(context, previousSession);
+        foreach (var hook in hooks) {
+            await hook.OnAuthenticatedAsync(context, previousSession);
         }
     }
 
@@ -344,13 +360,13 @@ internal sealed class WebSocketHandler(
 
         // The request token is already cancelled; close hooks get the shutdown deadline instead.
         var context = CreateContext(connection, timeout.Token);
-        foreach (var middleware in middlewares) {
+        foreach (var hook in hooks) {
             try {
-                var closing = middleware.OnCloseAsync(context);
+                var closing = hook.OnCloseAsync(context);
                 tasks.Add(closing);
                 await closing.WaitAsync(timeout.Token);
             } catch (Exception error) {
-                Log.CloseMiddlewareFailed(logger, error);
+                Log.CloseHookFailed(logger, error);
             }
         }
 
@@ -453,8 +469,8 @@ internal sealed class WebSocketHandler(
         public static readonly Action<ILogger, Exception?> ShutdownFailed =
             LoggerMessage.Define(LogLevel.Warning, new EventId(14, nameof(ShutdownFailed)), "WebSocket task failed during shutdown");
 
-        public static readonly Action<ILogger, Exception?> CloseMiddlewareFailed =
-            LoggerMessage.Define(LogLevel.Warning, new EventId(15, nameof(CloseMiddlewareFailed)), "WebSocket close middleware failed");
+        public static readonly Action<ILogger, Exception?> CloseHookFailed =
+            LoggerMessage.Define(LogLevel.Warning, new EventId(15, nameof(CloseHookFailed)), "WebSocket close hook failed");
 
         public static readonly Action<ILogger, Exception?> CloseFailed =
             LoggerMessage.Define(LogLevel.Debug, new EventId(16, nameof(CloseFailed)), "WebSocket graceful close failed");

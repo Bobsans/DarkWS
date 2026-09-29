@@ -21,7 +21,7 @@ public sealed class BroadcastTests {
         storage.Add(CreateConnection(firstSocket, "one"));
         storage.Add(CreateConnection(secondSocket, "two"));
 
-        await host.Services.GetRequiredService<IBroadcaster>().BroadcastAsync("refreshed");
+        await host.Services.GetRequiredService<IBroadcaster>().PublishAsync(BroadcastTarget.All, "refreshed");
 
         Assert.That(ReadAction(firstSocket), Is.EqualTo("refreshed"));
         Assert.That(ReadAction(secondSocket), Is.EqualTo("refreshed"));
@@ -40,7 +40,7 @@ public sealed class BroadcastTests {
         storage.Add(CreateConnection(otherSocket, "two"));
 
         await host.Services.GetRequiredService<IBroadcaster>()
-            .BroadcastToConnectionAsync(matching.Id, "private");
+            .PublishAsync(BroadcastTarget.Connection(matching.Id), "private");
 
         Assert.That(ReadAction(matchingSocket), Is.EqualTo("private"));
         Assert.That(otherSocket.Sent, Is.Empty);
@@ -60,7 +60,7 @@ public sealed class BroadcastTests {
         storage.Add(CreateConnection(otherSocket, "other"));
 
         await host.Services.GetRequiredService<IBroadcaster>()
-            .BroadcastToSessionAsync("shared", "session", new { Value = 42 });
+            .PublishAsync(BroadcastTarget.Session("shared"), "session", new { Value = 42 });
 
         Assert.That(ReadAction(firstSocket), Is.EqualTo("session"));
         Assert.That(ReadAction(secondSocket), Is.EqualTo("session"));
@@ -79,7 +79,7 @@ public sealed class BroadcastTests {
         storage.Add(CreateConnection(otherSocket, "two"));
 
         await host.Services.GetRequiredService<IBroadcaster>()
-            .BroadcastToGroupAsync("session:one", "updated", new { Value = 1 });
+            .PublishAsync(BroadcastTarget.Group("session:one"), "updated", new { Value = 1 });
 
         Assert.That(matchingSocket.Sent, Has.Count.EqualTo(1));
         Assert.That(otherSocket.Sent, Is.Empty);
@@ -97,8 +97,8 @@ public sealed class BroadcastTests {
         using var connection = CreateConnection(socket, "one");
 
         await Task.WhenAll(
-            connection.SendAsync([1]),
-            connection.SendAsync([2])
+            connection.SendAsync(new byte[] { 1 }),
+            connection.SendAsync(new byte[] { 2 })
         );
 
         Assert.That(socket.MaxConcurrentSends, Is.EqualTo(1));
@@ -111,7 +111,7 @@ public sealed class BroadcastTests {
         var socket = new TestWebSocket { SendDelay = TimeSpan.FromSeconds(1) };
         host.Services.GetRequiredService<ConnectionStorage>().Add(CreateConnection(socket, "one"));
 
-        await host.Services.GetRequiredService<IBroadcaster>().BroadcastAsync("updated", new { Value = 1 });
+        await host.Services.GetRequiredService<IBroadcaster>().PublishAsync(BroadcastTarget.All, "updated", new { Value = 1 });
 
         Assert.That(socket.WasAborted, Is.True);
         await host.StopAsync();
@@ -126,9 +126,9 @@ public sealed class BroadcastTests {
         host.Services.GetRequiredService<ConnectionStorage>().Add(connection);
         var broadcaster = host.Services.GetRequiredService<IBroadcaster>();
 
-        await broadcaster.BroadcastToConnectionAsync(connection.Id, "connection-data", new { Value = 1 });
-        await broadcaster.BroadcastToSessionAsync("one", "session-empty");
-        await broadcaster.BroadcastToGroupAsync("session:one", "group-empty");
+        await broadcaster.PublishAsync(BroadcastTarget.Connection(connection.Id), "connection-data", new { Value = 1 });
+        await broadcaster.PublishAsync(BroadcastTarget.Session("one"), "session-empty");
+        await broadcaster.PublishAsync(BroadcastTarget.Group("session:one"), "group-empty");
 
         var actions = socket.Sent.Select(data => {
             using var message = JsonDocument.Parse(data);
@@ -146,7 +146,7 @@ public sealed class BroadcastTests {
         host.Services.GetRequiredService<ConnectionStorage>().Add(CreateConnection(socket, "one"));
         socket.SetState(WebSocketState.Closed);
 
-        await host.Services.GetRequiredService<IBroadcaster>().BroadcastAsync("ignored", new { Value = 1 });
+        await host.Services.GetRequiredService<IBroadcaster>().PublishAsync(BroadcastTarget.All, "ignored", new { Value = 1 });
 
         Assert.That(socket.Sent, Is.Empty);
         await host.StopAsync();

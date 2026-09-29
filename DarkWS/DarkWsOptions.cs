@@ -43,6 +43,9 @@ public sealed class DarkWsOptions {
     /// <summary>Shared deadline for cancellation, close hooks, and handshake. Default 10 seconds; uncooperative tasks retain resources until completion.</summary>
     public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
+    /// <summary>Browser origins allowed to open the DarkWS endpoint, such as https://app.example.com, compared case-insensitively. A listed-out Origin gets HTTP 403 before authentication; requests without an Origin header (non-browser clients) are accepted. Default empty accepts every origin, so cookie-authenticated apps must set it or WebSocketOptions.AllowedOrigins.</summary>
+    public IList<string> AllowedOrigins { get; } = new List<string>();
+
     /// <summary>Connection token query parameter. Default token; must not be blank.</summary>
     public string AuthenticationQueryParameter { get; set; } = "token";
 
@@ -66,8 +69,4 @@ public sealed class DarkWsOptions {
 
     /// <summary>Code for a request rejected because the connection queue stayed full for RequestQueueTimeout. Default darkws:error:busy.</summary>
     public string BusyError { get; set; } = "darkws:error:busy";
-
-    /// <summary>Unused legacy JSON authentication error code, retained for binary compatibility. Scheduled for removal in the next major version.</summary>
-    [Obsolete("AuthenticationFailedError is unused. Text authentication always replies auth:failed. This option will be removed in the next major version.")]
-    public string AuthenticationFailedError { get; set; } = "darkws:error:authentication-failed";
 }

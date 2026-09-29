@@ -40,6 +40,7 @@ public static class DarkWsServiceCollectionExtensions {
 
         services.AddSingleton(registry);
         services.TryAddSingleton<ConnectionStorage>();
+        services.TryAddSingleton<IDarkWsConnections>(provider => provider.GetRequiredService<ConnectionStorage>());
         services.TryAddSingleton<InMemoryDarkWsBackplane>();
         services.TryAddSingleton<IDarkWsBackplane>(provider =>
             provider.GetRequiredService<InMemoryDarkWsBackplane>());

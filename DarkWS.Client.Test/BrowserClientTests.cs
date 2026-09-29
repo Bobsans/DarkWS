@@ -162,7 +162,13 @@ public sealed class BrowserClientTests {
         var package = Path.Combine(RepositoryRoot(), "packages", "darkws");
         var compiler = Path.Combine(package, "node_modules", "typescript", "bin", "tsc");
         if (!File.Exists(compiler)) {
-            Assert.Ignore("Run npm ci --prefix packages/darkws to install the browser package tools.");
+            const string message = "Run npm ci --prefix packages/darkws to install the browser package tools.";
+            // A skipped cross-language contract must not turn CI green.
+            if (string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)) {
+                Assert.Fail(message);
+            }
+
+            Assert.Ignore(message);
         }
 
         var output = Directory.CreateTempSubdirectory("darkws-browser-");

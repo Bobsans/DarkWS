@@ -1,6 +1,10 @@
-<img src="https://raw.githubusercontent.com/Bobsans/DarkWS/main/assets/icon.png" alt="DarkWS" width="96" align="right">
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/Bobsans/DarkWS/main/assets/icon.png" alt="DarkWS logo" width="96">
 
 # darkws
+
+</div>
 
 Dependency-free DarkWS request/response client for browsers.
 

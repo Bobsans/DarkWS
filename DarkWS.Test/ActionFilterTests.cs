@@ -33,7 +33,11 @@ public sealed class ActionFilterTests {
             Assert.That(probe.Action?.HandlerType, Is.EqualTo(typeof(FilterHandler)));
             Assert.That(probe.Action?.Method.Name, Is.EqualTo(nameof(FilterHandler.Run)));
             Assert.That(probe.Action?.Attributes.OfType<FilterMarkerAttribute>().Any(), Is.True);
+            Assert.That(probe.Action?.HandlerAttributes.OfType<FilterMarkerAttribute>().Any(), Is.True);
+            Assert.That(probe.Action?.HandlerAttributes.OfType<HandlerAttribute>().Single().Name, Is.EqualTo("filters"));
             Assert.That(probe.Payload, Is.EqualTo("hello"));
+            Assert.That(probe.RequestId, Is.EqualTo("run"));
+            Assert.That(probe.RawPayload, Is.EqualTo("\"hello\""));
             Assert.That(probe.SessionId, Is.EqualTo("first"));
             Assert.That(probe.FilterScope, Is.Not.Null);
             Assert.That(probe.HandlerServicesMatch, Is.True);
@@ -66,8 +70,46 @@ public sealed class ActionFilterTests {
         Assert.That(probe.Events, Is.Empty);
     }
 
+    [Test]
+    public async Task RequestFiltersSeeRejectedRequestsAndInitializerFailures() {
+        using var host = await Setup.CreateBuilder((services, darkWs) => {
+            services.AddSingleton<FilterProbe>();
+            darkWs.AddScopeInitializer<MetadataInitializer>()
+                .AddRequestFilter<RecordingRequestFilter>()
+                .AddActionFilter<InnerFilter>();
+        }).StartAsync();
+        var probe = host.Services.GetRequiredService<FilterProbe>();
+        using var socket = await host.GetTestServer().CreateWebSocketClient()
+            .ConnectAsync(new Uri("ws://localhost/ws?token=first"), CancellationToken.None);
+        using var anonymous = await host.GetTestServer().CreateWebSocketClient()
+            .ConnectAsync(new Uri("ws://localhost/ws"), CancellationToken.None);
+
+        await socket.SendMessage(new RequestMessage<string>("run", "filters:run", "hello"));
+        Assert.That(await socket.ReceiveMessage<ResponseMessage<string>>(), Is.EqualTo(new ResponseMessage<string>("run", "hello")));
+        await socket.SendMessage(new RequestMessage("missing", "missing:action"));
+        Assert.That(await socket.ReceiveMessage<ErrorMessage>(), Is.EqualTo(new ErrorMessage("missing", "darkws:error:invalid-action")));
+        await socket.SendTextAsync("{\"id\":\"invalid\",\"action\":\"filters:run\",\"data\":null}");
+        Assert.That(await socket.ReceiveMessage<ErrorMessage>(), Is.EqualTo(new ErrorMessage("invalid", "darkws:error:invalid-request")));
+        await anonymous.SendMessage(new RequestMessage("denied", "test:get"));
+        Assert.That(await anonymous.ReceiveMessage<ErrorMessage>(), Is.EqualTo(new ErrorMessage("denied", "darkws:error:authorization-required")));
+        await socket.SendMessage(new RequestMessage("init", "filters:init-fail"));
+        Assert.That(await socket.ReceiveMessage<ErrorMessage>(), Is.EqualTo(new ErrorMessage("init", "darkws:error:request-failed")));
+
+        Assert.That(probe.Requests.ToArray(), Is.EqualTo(new[] {
+            "run|filters:run|filters:run|\"hello\"|ok",
+            "missing|missing:action||-|darkws:error:invalid-action",
+            "invalid|filters:run|filters:run|-|darkws:error:invalid-request",
+            "denied|test:get|test:get|-|darkws:error:authorization-required",
+            "init|filters:init-fail|filters:init-fail|-|InvalidOperationException"
+        }));
+        Assert.That(probe.Events.ToArray(), Is.EqualTo(new[] { "inner:before", "handler", "inner:after" }));
+    }
+
     public sealed class FilterProbe {
         public ConcurrentQueue<string> Events { get; } = new();
+        public ConcurrentQueue<string> Requests { get; } = new();
+        public string? RequestId;
+        public string? RawPayload;
         public DarkWsActionInfo? Action;
         public DarkWsActionInfo? InitializerAction;
         public DarkWsActionInfo? AccessorAction;
@@ -81,7 +123,23 @@ public sealed class ActionFilterTests {
     public sealed class MetadataInitializer(FilterProbe probe) : IDarkWsScopeInitializer {
         public ValueTask InitializeAsync(IServiceProvider scopedServices, IDarkWsContextAccessor context, CancellationToken cancellationToken) {
             probe.InitializerAction = context.Action;
-            return ValueTask.CompletedTask;
+            return context.Action?.Name == "filters:init-fail"
+                ? throw new InvalidOperationException("initializer failure")
+                : ValueTask.CompletedTask;
+        }
+    }
+
+    public sealed class RecordingRequestFilter(FilterProbe probe) : IDarkWsRequestFilter {
+        public async ValueTask<IResponse> InvokeAsync(DarkWsRequestContext context, Func<ValueTask<IResponse>> next) {
+            var prefix = $"{context.RequestId}|{context.ActionName}|{context.Action?.Name}|{context.RawPayload?.GetRawText() ?? "-"}";
+            try {
+                var response = await next();
+                probe.Requests.Enqueue($"{prefix}|{(response as ErrorResponse)?.Error ?? "ok"}");
+                return response;
+            } catch (Exception error) {
+                probe.Requests.Enqueue($"{prefix}|{error.GetType().Name}");
+                throw;
+            }
         }
     }
 
@@ -89,6 +147,8 @@ public sealed class ActionFilterTests {
         public async ValueTask<IResponse> InvokeAsync(DarkWsActionContext context, Func<ValueTask<IResponse>> next) {
             probe.Events.Enqueue("outer:before");
             probe.Action = context.Action;
+            probe.RequestId = context.RequestId;
+            probe.RawPayload = context.RawPayload?.GetRawText();
             probe.AccessorAction = accessor.Action;
             probe.Payload = context.Payload;
             probe.SessionId = context.Session?.Id;
@@ -117,11 +177,14 @@ public sealed class ActionFilterTests {
         }
     }
 
-    [AttributeUsage(AttributeTargets.Method)]
+    [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class)]
     public sealed class FilterMarkerAttribute : Attribute { }
 
-    [Handler("filters"), AllowAnonymous]
+    [Handler("filters"), AllowAnonymous, FilterMarker]
     public sealed class FilterHandler(FilterProbe probe, ScopedProbe scoped) : HandlerBase {
+        [Action("init-fail")]
+        public IResponse InitFail() => new SuccessResponse();
+
         [Action("run"), FilterMarker]
         public IResponse Run(string value) {
             probe.Events.Enqueue("handler");

@@ -20,7 +20,7 @@ internal sealed class RedisDarkWsBackplane(
     private Task? _subscriptionDeliveries;
 
     public async ValueTask PublishAsync(
-        DarkWsBroadcast message,
+        BroadcastMessage message,
         CancellationToken cancellationToken = default
     ) {
         ArgumentNullException.ThrowIfNull(message);
@@ -31,7 +31,7 @@ internal sealed class RedisDarkWsBackplane(
     }
 
     public async ValueTask SubscribeAsync(
-        Func<DarkWsBroadcast, CancellationToken, ValueTask> listener,
+        Func<BroadcastMessage, CancellationToken, ValueTask> listener,
         CancellationToken cancellationToken = default
     ) {
         ArgumentNullException.ThrowIfNull(listener);
@@ -78,7 +78,7 @@ internal sealed class RedisDarkWsBackplane(
         }
     }
 
-    private async Task ReceiveAsync(ChannelMessageQueue subscription, Func<DarkWsBroadcast, CancellationToken, ValueTask> listener, CancellationToken token) {
+    private async Task ReceiveAsync(ChannelMessageQueue subscription, Func<BroadcastMessage, CancellationToken, ValueTask> listener, CancellationToken token) {
         try {
             while (true) {
                 // Keep draining after lifetime cancellation until unsubscribe completes the Redis queue.
@@ -100,10 +100,10 @@ internal sealed class RedisDarkWsBackplane(
         }
     }
 
-    private async Task HandleMessageAsync(ChannelMessage message, Func<DarkWsBroadcast, CancellationToken, ValueTask> listener, CancellationToken cancellationToken) {
+    private async Task HandleMessageAsync(ChannelMessage message, Func<BroadcastMessage, CancellationToken, ValueTask> listener, CancellationToken cancellationToken) {
         try {
             cancellationToken.ThrowIfCancellationRequested();
-            var broadcast = JsonSerializer.Deserialize<DarkWsBroadcast>((byte[])message.Message!, _jsonOptions);
+            var broadcast = JsonSerializer.Deserialize<BroadcastMessage>((byte[])message.Message!, _jsonOptions);
             if (broadcast is not null) {
                 await listener(broadcast, cancellationToken);
             }

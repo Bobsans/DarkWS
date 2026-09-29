@@ -7,7 +7,7 @@ namespace DarkWS;
 /// <param name="Id">Correlation or identity key.</param>
 /// <param name="Action">Application action name.</param>
 /// <param name="Payload">Optional request data, serialized as the data field.</param>
-public sealed record InputMessage(
+internal sealed record InputMessage(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("action")] string Action,
     [property: JsonPropertyName("data")] JsonElement? Payload
@@ -15,14 +15,14 @@ public sealed record InputMessage(
 
 /// <summary>Successful response without data, correlated by request id.</summary>
 /// <param name="Id">Correlation or identity key.</param>
-public sealed record OkMessage(
+internal sealed record OkMessage(
     [property: JsonPropertyName("id")] string Id
 );
 
 /// <summary>Successful response carrying correlated result data.</summary>
 /// <param name="Id">Correlation or identity key.</param>
 /// <param name="Data">Optional result or notification data.</param>
-public sealed record ResponseMessage<T>(
+internal sealed record ResponseMessage<T>(
     [property: JsonPropertyName("id")] string Id,
     // Written even under WhenWritingNull: a missing data field means "no data" to clients.
     [property: JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.Never)]
@@ -32,7 +32,7 @@ public sealed record ResponseMessage<T>(
 /// <summary>Error response carrying a stable code and optional typed details.</summary>
 /// <param name="Id">Correlation or identity key.</param>
 /// <param name="Error">Stable error code.</param>
-public sealed record ErrorMessage(
+internal sealed record ErrorMessage(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("error")] string Error
 );
@@ -41,7 +41,7 @@ public sealed record ErrorMessage(
 /// <param name="Id">Correlation or identity key.</param>
 /// <param name="Error">Stable error code.</param>
 /// <param name="Data">Optional result or notification data.</param>
-public sealed record ErrorMessage<T>(
+internal sealed record ErrorMessage<T>(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("error")] string Error,
     [property: JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.Never)]
@@ -50,7 +50,7 @@ public sealed record ErrorMessage<T>(
 
 /// <summary>Notification envelope containing the reserved id and application action.</summary>
 /// <param name="Action">Application action name.</param>
-public sealed record BroadcastActionMessage(
+internal sealed record BroadcastActionMessage(
     [property: JsonPropertyName("action")] string Action
 ) {
     /// <summary>Reserved notification id.</summary>
@@ -61,7 +61,7 @@ public sealed record BroadcastActionMessage(
 /// <summary>Notification envelope containing the reserved id, application action, and data.</summary>
 /// <param name="Action">Application action name.</param>
 /// <param name="Data">Optional result or notification data.</param>
-public sealed record BroadcastActionMessage<T>(
+internal sealed record BroadcastActionMessage<T>(
     [property: JsonPropertyName("action")] string Action,
     [property: JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     T? Data

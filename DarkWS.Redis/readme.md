@@ -4,12 +4,11 @@ Redis backplane for `DarkWS`.
 
 ```csharp
 builder.Services.AddSingleton<IConnectionMultiplexer>(redis);
-builder.Services.AddDarkWsRedis("my-app:production");
+builder.Services.AddDarkWs().AddRedis("my-app:production");
 ```
 
-Register `DarkWS` before this package. Use a unique channel per
-application and environment. Call `AddDarkWsRedis` once; a second call throws
-`InvalidOperationException`.
+Use a unique channel per application and environment. Call `AddRedis` once; a
+second call throws `InvalidOperationException`.
 
 Redis Pub/Sub delivers at most once: broadcasts published while an instance is
 disconnected from Redis are lost for that instance's clients without an error.
@@ -55,8 +54,7 @@ Receiver tasks are tracked and the lifetime source is released after they finish
 Unsubscribe does not wait for an uncooperative listener, and can be called from a
 listener without waiting for itself. Already-running listeners must honor cancellation.
 
-Static callers should use `DarkWsRedisServiceCollectionExtensions`. The old
-`RedisConfiguration` static wrapper is obsolete; extension-call syntax is unchanged.
+Static callers should use `DarkWsRedisBuilderExtensions`.
 
 ## Trust boundary
 

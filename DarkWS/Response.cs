@@ -59,6 +59,9 @@ public sealed class SuccessResponse : IResponse {
 public class ErrorResponse(string error) : IResponse {
     private readonly string _error = ValidateError(error);
 
+    /// <summary>Gets the stable error code sent to the client.</summary>
+    public string Error => _error;
+
     /// <summary>Writes this result using the supplied correlation context and cancellation token.</summary>
     public Task WriteResultAsync(ResponseContext context, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(context);
@@ -76,6 +79,9 @@ public class ErrorResponse(string error) : IResponse {
 /// <param name="details">Typed details sent to the client.</param>
 public sealed class ErrorResponse<T>(string error, T details) : IResponse {
     private readonly string _error = ErrorResponse.ValidateError(error);
+
+    /// <summary>Gets the stable error code sent to the client.</summary>
+    public string Error => _error;
 
     /// <summary>Writes this result using the supplied correlation context and cancellation token.</summary>
     public Task WriteResultAsync(ResponseContext context, CancellationToken cancellationToken = default) {

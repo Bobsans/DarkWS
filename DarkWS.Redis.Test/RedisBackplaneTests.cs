@@ -39,10 +39,10 @@ public sealed class RedisBackplaneTests {
         await using var secondProvider = CreateProvider(channel);
         var first = firstProvider.GetRequiredService<IDarkWsBackplane>();
         var second = secondProvider.GetRequiredService<IDarkWsBackplane>();
-        var received = new ConcurrentBag<DarkWsBroadcast>();
+        var received = new ConcurrentBag<BroadcastMessage>();
         var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        ValueTask Listen(DarkWsBroadcast message, CancellationToken _) {
+        ValueTask Listen(BroadcastMessage message, CancellationToken _) {
             received.Add(message);
             if (received.Count == 2) {
                 completed.TrySetResult();
@@ -53,8 +53,8 @@ public sealed class RedisBackplaneTests {
 
         await first.SubscribeAsync(Listen);
         await second.SubscribeAsync(Listen);
-        var message = new DarkWsBroadcast(
-            DarkWsTarget.Group,
+        var message = new BroadcastMessage(
+            BroadcastTargetType.Group,
             "account:42",
             "changed",
             JsonSerializer.SerializeToElement(new { Value = 1 })
@@ -64,25 +64,24 @@ public sealed class RedisBackplaneTests {
         await completed.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.That(received, Has.Count.EqualTo(2));
-        Assert.That(received.All(it => it.Target == DarkWsTarget.Group), Is.True);
+        Assert.That(received.All(it => it.TargetType ==BroadcastTargetType.Group), Is.True);
         Assert.That(received.All(it => it.TargetId == "account:42"), Is.True);
         Assert.That(received.All(it => it.Action == "changed"), Is.True);
     }
 
     [Test]
     public void EmptyChannelIsRejected() {
-        var services = new ServiceCollection();
-        Assert.Throws<ArgumentException>(() => services.AddDarkWsRedis(" "));
+        var builder = new ServiceCollection().AddDarkWs();
+        Assert.Throws<ArgumentException>(() => builder.AddRedis(" "));
     }
 
     [Test]
     public void RepeatedRegistrationIsRejected() {
-        var services = new ServiceCollection();
-        services.AddDarkWsRedis("first");
+        var builder = new ServiceCollection().AddDarkWs().AddRedis("first");
 
-        var error = Assert.Throws<InvalidOperationException>(() => services.AddDarkWsRedis("second"))!;
+        var error = Assert.Throws<InvalidOperationException>(() => builder.AddRedis("second"))!;
 
-        Assert.That(error.Message, Does.Contain("AddDarkWsRedis"));
+        Assert.That(error.Message, Does.Contain("AddRedis"));
     }
 
     [Test]
@@ -127,7 +126,7 @@ public sealed class RedisBackplaneTests {
         await backplane.UnsubscribeAsync();
 
         try {
-            await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "ignored", null));
+            await backplane.PublishAsync(new BroadcastMessage(BroadcastTargetType.All, null, "ignored", null));
             // The control subscriber on the same channel proves the message went through Redis.
             await delivered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         } finally {
@@ -145,14 +144,14 @@ public sealed class RedisBackplaneTests {
         var channel = $"darkws-test:{Guid.NewGuid():N}";
         await using var provider = CreateProvider(channel);
         var backplane = provider.GetRequiredService<IDarkWsBackplane>();
-        var received = new TaskCompletionSource<DarkWsBroadcast>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var received = new TaskCompletionSource<BroadcastMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         await backplane.SubscribeAsync((message, _) => {
             received.TrySetResult(message);
             return ValueTask.CompletedTask;
         });
         await _connection.GetSubscriber().PublishAsync(RedisChannel.Literal(channel), invalid);
 
-        await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "valid", null));
+        await backplane.PublishAsync(new BroadcastMessage(BroadcastTargetType.All, null, "valid", null));
 
         Assert.That((await received.Task.WaitAsync(TimeSpan.FromSeconds(10))).Action, Is.EqualTo("valid"));
     }
@@ -164,7 +163,7 @@ public sealed class RedisBackplaneTests {
         var channel = $"darkws-test:{Guid.NewGuid():N}";
         using var provider = CreateProvider(channel);
         var backplane = provider.GetRequiredService<IDarkWsBackplane>();
-        var message = new DarkWsBroadcast(DarkWsTarget.All, null, "cancelled", null);
+        var message = new BroadcastMessage(BroadcastTargetType.All, null, "cancelled", null);
 
         await Assert.MultipleAsync(async () => {
             await Assert.ThrowsAsync<OperationCanceledException>(async () =>
@@ -186,7 +185,7 @@ public sealed class RedisBackplaneTests {
         await using var secondProvider = CreateProvider(channel, options => options.JsonOptions.PropertyNamingPolicy = null);
         var first = firstProvider.GetRequiredService<IDarkWsBackplane>();
         var second = secondProvider.GetRequiredService<IDarkWsBackplane>();
-        var received = new TaskCompletionSource<DarkWsBroadcast>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var received = new TaskCompletionSource<BroadcastMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         var raw = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var wire = await _connection.GetSubscriber().SubscribeAsync(RedisChannel.Literal(channel));
         wire.OnMessage(message => raw.TrySetResult(message.Message.ToString()));
@@ -196,12 +195,12 @@ public sealed class RedisBackplaneTests {
         });
         try {
             var data = JsonSerializer.SerializeToElement(new { DisplayName = "Ada" }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower });
-            await first.PublishAsync(new DarkWsBroadcast(DarkWsTarget.Group, "group", "changed", data));
+            await first.PublishAsync(new BroadcastMessage(BroadcastTargetType.Group, "group", "changed", data));
             var result = await received.Task.WaitAsync(TimeSpan.FromSeconds(10));
             using var envelope = JsonDocument.Parse(await raw.Task.WaitAsync(TimeSpan.FromSeconds(10)));
             Assert.That(envelope.RootElement.GetProperty("target").GetInt32(), Is.EqualTo(3));
             Assert.That(envelope.RootElement.GetProperty("targetId").GetString(), Is.EqualTo("group"));
-            Assert.That(result.Target, Is.EqualTo(DarkWsTarget.Group));
+            Assert.That(result.TargetType,Is.EqualTo(BroadcastTargetType.Group));
             Assert.That(result.Data!.Value.GetProperty("display_name").GetString(), Is.EqualTo("Ada"));
         } finally {
             await second.UnsubscribeAsync();
@@ -228,7 +227,7 @@ public sealed class RedisBackplaneTests {
             return ValueTask.CompletedTask;
         });
         try {
-            await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "new", null));
+            await backplane.PublishAsync(new BroadcastMessage(BroadcastTargetType.All, null, "new", null));
             await received.Task.WaitAsync(TimeSpan.FromSeconds(10));
             Assert.That(calls, Is.EqualTo(1));
             Assert.That(oldCalls, Is.Zero);
@@ -253,7 +252,7 @@ public sealed class RedisBackplaneTests {
                 }
             }
         }, lifetime.Token);
-        await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "blocked", null));
+        await backplane.PublishAsync(new BroadcastMessage(BroadcastTargetType.All, null, "blocked", null));
         await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
         if (cancelCaller) {
             lifetime.Cancel();
@@ -280,11 +279,11 @@ public sealed class RedisBackplaneTests {
         storage.Add(slow);
         storage.Add(fast);
         var broadcaster = provider.GetRequiredService<IBroadcaster>();
-        var slowPublish = broadcaster.BroadcastToGroupAsync("slow", "first");
+        var slowPublish = broadcaster.PublishAsync(BroadcastTarget.Group("slow"), "first");
         try {
             await slow.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
             var timer = Stopwatch.StartNew();
-            await broadcaster.BroadcastToGroupAsync("fast", "second");
+            await broadcaster.PublishAsync(BroadcastTarget.Group("fast"), "second");
             await fast.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
             timer.Stop();
             TestContext.Progress.WriteLine($"Redis={useRedis}: unrelated broadcast delivered in {timer.Elapsed.TotalMilliseconds:F1} ms");
@@ -319,7 +318,7 @@ public sealed class RedisBackplaneTests {
         });
         try {
             for (var index = 0; index < 64; index++) {
-                await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "blocked", null));
+                await backplane.PublishAsync(new BroadcastMessage(BroadcastTargetType.All, null, "blocked", null));
             }
 
             await saturated.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -349,7 +348,7 @@ public sealed class RedisBackplaneTests {
         try {
             for (var window = 0; window < 3; window++) {
                 for (var index = 0; index < 300; index++) {
-                    await broadcaster.BroadcastToGroupAsync("slow", "load", payload, deadline.Token);
+                    await broadcaster.PublishAsync(BroadcastTarget.Group("slow"), "load", payload, deadline.Token);
                     published++;
                     await Task.Delay(10, deadline.Token);
                 }
@@ -380,7 +379,7 @@ public sealed class RedisBackplaneTests {
             stopped.TrySetResult();
         });
         try {
-            await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "stop", null));
+            await backplane.PublishAsync(new BroadcastMessage(BroadcastTargetType.All, null, "stop", null));
             await stopped.Task.WaitAsync(TimeSpan.FromSeconds(10));
         } finally {
             await backplane.UnsubscribeAsync();
@@ -418,13 +417,12 @@ public sealed class RedisBackplaneTests {
             }
         });
         try {
-            var except = excludeSession
-                ? new DarkWsBroadcastExclusion { SessionId = "user" }
-                : new DarkWsBroadcastExclusion { ConnectionId = sender.Id };
+            var groups = BroadcastTarget.Groups(["a", "b", "a"]);
+            var target = excludeSession ? groups.ExceptSession("user") : groups.ExceptConnection(sender.Id);
             var broadcaster = first.GetRequiredService<IBroadcaster>();
-            await broadcaster.BroadcastToGroupsAsync<string?>(["a", "b", "a"], "updated", null, except);
+            await broadcaster.PublishAsync<string?>(target, "updated", null);
             // Deliveries can finish out of order; wait for both the marker and the expected broadcast recipients.
-            await broadcaster.BroadcastAsync("barrier");
+            await broadcaster.PublishAsync(BroadcastTarget.All, "barrier");
             await barrier.Task.WaitAsync(TimeSpan.FromSeconds(10));
             DarkWsTestConnection[] connections = [sender, otherTab, otherUser, unrelated];
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -478,15 +476,13 @@ public sealed class RedisBackplaneTests {
 
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public string Id { get; } = Guid.NewGuid().ToString("N");
-        public WebSocket WebSocket => throw new NotSupportedException();
         public HttpContext HttpContext { get; } = new DefaultHttpContext();
         public IDarkWsSession Session => this;
         public ClaimsPrincipal User { get; } = new();
         public IReadOnlyCollection<string> Groups => [group];
         public bool IsOpen { get; private set; } = true;
-        public Task<ReceivedMessage> ReceiveMessageAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        public async Task SendAsync(byte[] data, CancellationToken cancellationToken = default) {
+        public async Task SendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) {
             lock (_stats) {
                 _active++;
                 _peak = Math.Max(_peak, _active);
@@ -523,9 +519,9 @@ public sealed class RedisBackplaneTests {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(_connection);
-        services.AddDarkWs(configure);
+        var darkWs = services.AddDarkWs(configure);
         if (useRedis) {
-            services.AddDarkWsRedis(channel);
+            darkWs.AddRedis(channel);
         }
 
         return services.BuildServiceProvider();

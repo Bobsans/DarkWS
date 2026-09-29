@@ -47,6 +47,5 @@ The host owns its service provider and connections and always substitutes an iso
 backplane, even if application configuration registers Redis. Hosted services, HTTP middleware,
 authentication exchanges, connection lifecycle hooks, transport queues/timeouts, and frame limits
 are not run. Cover those with real WebSocket integration tests.
-The fake's `WebSocket` and `ReceiveMessageAsync` members throw `NotSupportedException`.
 Connection sessions are fixed at creation. Configure recipients before invoking concurrent actions,
 await all invocations and dispose manual scopes before disposing the host.

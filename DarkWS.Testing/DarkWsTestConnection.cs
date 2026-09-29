@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Net.WebSockets;
 using System.Security.Claims;
 using DarkWS.Abstractions;
 using Microsoft.AspNetCore.Http;
@@ -20,9 +19,6 @@ public sealed class DarkWsTestConnection : IWebSocketConnection {
     /// <summary>Gets the generated connection id used for targeted broadcasts.</summary>
     public string Id { get; } = Guid.NewGuid().ToString("N");
 
-    /// <summary>Throws NotSupportedException because no WebSocket transport exists.</summary>
-    public WebSocket WebSocket => throw new NotSupportedException("This test connection has no WebSocket transport.");
-
     /// <summary>Gets the supplied or default HTTP context.</summary>
     public HttpContext HttpContext { get; }
 
@@ -35,13 +31,8 @@ public sealed class DarkWsTestConnection : IWebSocketConnection {
     /// <summary>Gets a snapshot of captured UTF-8 messages, in send order.</summary>
     public IReadOnlyList<byte[]> SentMessages => _sentMessages.ToArray();
 
-    /// <summary>Throws NotSupportedException; invoke actions through DarkWsTestHost instead.</summary>
-    public Task<ReceivedMessage> ReceiveMessageAsync(CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException("Invoke actions through DarkWsTestHost instead of receiving transport frames.");
-
     /// <summary>Captures a copy of the data. Closed connections ignore sends, like the server transport.</summary>
-    public Task SendAsync(byte[] data, CancellationToken cancellationToken = default) {
-        ArgumentNullException.ThrowIfNull(data);
+    public Task SendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) {
         cancellationToken.ThrowIfCancellationRequested();
         if (IsOpen) {
             _sentMessages.Enqueue(data.ToArray());

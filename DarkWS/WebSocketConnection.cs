@@ -10,7 +10,7 @@ namespace DarkWS;
 /// <param name="context">HTTP upgrade context.</param>
 /// <param name="session">Initial session, or null for anonymous access.</param>
 /// <param name="maxMessageSizeBytes">Positive complete-message size limit in bytes.</param>
-public sealed class WebSocketConnection(
+internal sealed class WebSocketConnection(
     WebSocket webSocket,
     HttpContext context,
     IDarkWsSession? session,
@@ -34,8 +34,16 @@ public sealed class WebSocketConnection(
     /// <summary>Gets the stable identity for connection or session targeting.</summary>
     public string Id { get; } = Guid.NewGuid().ToString("N");
 
-    /// <summary>Gets the HTTP upgrade context shared by the connection.</summary>
-    public HttpContext HttpContext { get; } = context ?? throw new ArgumentNullException(nameof(context));
+    private readonly HttpContext _httpContext = context ?? throw new ArgumentNullException(nameof(context));
+    private bool _upgradeCompleted;
+
+    /// <summary>Gets the HTTP upgrade context shared by the connection. Throws ObjectDisposedException once the upgrade request has completed.</summary>
+    // ASP.NET Core recycles HttpContext after its request (HTTP/2 streams reuse it), so late reads must fail rather than see another request.
+    public HttpContext HttpContext => Volatile.Read(ref _upgradeCompleted)
+        ? throw new ObjectDisposedException(nameof(HttpContext), "The WebSocket upgrade request has completed; copy HttpContext values before work that ignores ConnectionAborted.")
+        : _httpContext;
+
+    internal void CompleteUpgradeRequest() => Volatile.Write(ref _upgradeCompleted, true);
 
     /// <summary>Gets the owned transport. Use connection methods to preserve write serialization and disposal coordination.</summary>
     public WebSocket WebSocket { get; } = webSocket ?? throw new ArgumentNullException(nameof(webSocket));
@@ -98,8 +106,7 @@ public sealed class WebSocketConnection(
     }
 
     /// <summary>Sends immutable bytes with serialized writes. The built-in transport bounds lock wait and send time and aborts on timeout; closing connections ignore new writes.</summary>
-    public async Task SendAsync(byte[] data, CancellationToken cancellationToken = default) {
-        ArgumentNullException.ThrowIfNull(data);
+    public async Task SendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) {
         if (!TryBeginOperation()) {
             return;
         }
@@ -147,6 +154,9 @@ public sealed class WebSocketConnection(
             EndOperation();
         }
     }
+
+    /// <summary>Aborts the owned transport immediately.</summary>
+    public void Abort() => WebSocket.Abort();
 
     internal async Task CloseOutputAsync(WebSocketCloseStatus status, string reason, CancellationToken cancellationToken) {
         BeginClosing();

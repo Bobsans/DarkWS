@@ -101,7 +101,8 @@ headers/cookies. Use it if the HTTP endpoint requires authentication before open
 a socket. HTTP identity and DarkWS session authentication are distinct concerns.
 
 Starting logout disables the session token provider even if acknowledgement is
-lost. Update your source and successfully call `AuthenticateAsync` to re-enable
+lost. A call rejected with `DarkWsClientLimitException` has not started and leaves
+the provider enabled. Update your source and successfully call `AuthenticateAsync` to re-enable
 it. Clear application-owned upgrade headers/cookies separately so reconnect cannot
 restore the old HTTP identity. Logout does not roll back running server actions.
 
@@ -140,7 +141,9 @@ restore the old HTTP identity. Logout does not roll back running server actions.
   could contain the endpoint's query token. Payload/result conversion uses `JsonException`.
 - Observe `StateChanged` and `Error` for background failures. Request failures are
   returned through their tasks. Event observers run off the socket/UI context;
-  keep them short. Exceptions in `Error` observers are contained.
+  keep them short. Exceptions in `Error` observers are contained. When a slow
+  `Error` observer falls behind, at most `NotificationQueueCapacity` errors wait for
+  it and newer ones are dropped; `StateChanged` events are never dropped.
 
 ## Defaults and constraints
 

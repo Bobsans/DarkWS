@@ -389,7 +389,7 @@ public sealed class ConnectionLimitsTests {
             .UseKestrel(options => options.Listen(IPAddress.Loopback, 0))
             .ConfigureServices(services => {
                 services.AddRouting();
-                services.AddSingleton<DarkWsMiddleware>(lifecycle);
+                services.AddSingleton<DarkWsConnectionHooks>(lifecycle);
                 services.AddDarkWs(options => {
                     options.KeepAliveInterval = TimeSpan.FromMilliseconds(100);
                     options.KeepAliveTimeout = TimeSpan.FromMilliseconds(100);
@@ -421,19 +421,25 @@ public sealed class ConnectionLimitsTests {
         await host.StopAsync(timeout.Token);
     }
 
-    [Test]
-    public async Task AllowedOriginsRejectCrossSiteUpgradesBeforeDarkWsRuns() {
+    // Either the ASP.NET WebSocket middleware or DarkWsOptions.AllowedOrigins rejects cross-site upgrades.
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task AllowedOriginsRejectCrossSiteUpgradesBeforeDarkWsRuns(bool darkWsOption) {
         var lifecycle = new ConnectionProbe();
         using var host = await new HostBuilder().ConfigureWebHost(builder => builder
             .UseKestrel(options => options.Listen(IPAddress.Loopback, 0))
             .ConfigureServices(services => {
                 services.AddRouting();
-                services.AddSingleton<DarkWsMiddleware>(lifecycle);
-                services.AddDarkWs();
+                services.AddSingleton<DarkWsConnectionHooks>(lifecycle);
+                services.AddDarkWs(options => {
+                    if (darkWsOption) {
+                        options.AllowedOrigins.Add("https://APP.example");
+                    }
+                });
             })
             .Configure(app => {
                 app.UseRouting();
-                app.UseWebSockets(new WebSocketOptions { AllowedOrigins = { "https://app.example" } });
+                app.UseWebSockets(darkWsOption ? new WebSocketOptions() : new WebSocketOptions { AllowedOrigins = { "https://app.example" } });
                 app.UseEndpoints(endpoints => endpoints.MapDarkWs());
             })).StartAsync();
         var address = host.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
@@ -456,6 +462,70 @@ public sealed class ConnectionLimitsTests {
         Assert.That(await UpgradeAsync("https://app.example"), Is.EqualTo(HttpStatusCode.SwitchingProtocols));
         Assert.That(await UpgradeAsync(null), Is.EqualTo(HttpStatusCode.SwitchingProtocols));
         await host.StopAsync();
+    }
+
+    // HttpContext belongs to the upgrade request; once the connection has shut down, late reads fail deterministically.
+    [Test]
+    public async Task HandlerIgnoringCancellationCannotReadHttpContextAfterTheUpgradeRequestCompletes() {
+        var probe = new LateContextProbe();
+        using var host = await new HostBuilder().ConfigureWebHost(builder => builder
+            .UseKestrel(options => options.Listen(IPAddress.Loopback, 0))
+            .ConfigureServices(services => {
+                services.AddRouting();
+                services.AddSingleton(probe);
+                services.AddDarkWs(options => options.ShutdownTimeout = TimeSpan.FromMilliseconds(100));
+                services.AddScoped<LateContextHandler>();
+                services.AddSingleton(provider => {
+                    var registry = new DarkWsActionRegistry();
+                    registry.Add(typeof(LateContextHandler));
+                    return registry;
+                });
+            })
+            .Configure(app => {
+                app.UseRouting();
+                app.UseWebSockets();
+                app.UseEndpoints(endpoints => endpoints.MapDarkWs());
+            })).StartAsync();
+        var address = host.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+        using var socket = new ClientWebSocket();
+        await socket.ConnectAsync(new Uri(address.Replace("http://", "ws://", StringComparison.Ordinal) + "/ws"), CancellationToken.None);
+        await socket.SendAsync("{\"id\":\"1\",\"action\":\"late:read\"}"u8.ToArray(), WebSocketMessageType.Text, true, CancellationToken.None);
+        await probe.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        socket.Abort();
+        await probe.RequestCompleted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        probe.Release.TrySetResult();
+
+        Assert.That(await probe.Result.Task.WaitAsync(TimeSpan.FromSeconds(5)), Is.InstanceOf<ObjectDisposedException>());
+        await host.StopAsync();
+    }
+
+    public sealed class LateContextProbe {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource RequestCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<Exception?> Result { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    [Handler("late"), AllowAnonymous]
+    public sealed class LateContextHandler(LateContextProbe probe) : HandlerBase {
+        [Action("read")]
+        public async Task<IResponse> ReadAsync() {
+            HttpContext.Response.OnCompleted(() => {
+                probe.RequestCompleted.TrySetResult();
+                return Task.CompletedTask;
+            });
+            probe.Started.TrySetResult();
+            await probe.Release.Task; // Deliberately ignores ConnectionAborted.
+            try {
+                _ = HttpContext.Request.Path;
+                probe.Result.TrySetResult(null);
+            } catch (Exception error) {
+                probe.Result.TrySetResult(error);
+            }
+
+            return Ok();
+        }
     }
 
     private static ServiceProvider CreateProvider(Action<DarkWsOptions> configure) {
@@ -508,7 +578,7 @@ public sealed class ConnectionLimitsTests {
         }
     }
 
-    public sealed class ConnectionProbe : DarkWsMiddleware {
+    public sealed class ConnectionProbe : DarkWsConnectionHooks {
         public TaskCompletionSource Opened { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Closed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 

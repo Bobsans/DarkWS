@@ -12,7 +12,7 @@ namespace DarkWS.Testing;
 public sealed class DarkWsTestHost : IAsyncDisposable {
     private readonly ServiceProvider _services;
     private readonly InMemoryDarkWsBackplane _backplane = new();
-    private readonly ConcurrentQueue<DarkWsBroadcast> _broadcasts = new();
+    private readonly ConcurrentQueue<BroadcastMessage> _broadcasts = new();
     private readonly List<DarkWsTestConnection> _connections = [];
     private bool _disposed;
 
@@ -34,7 +34,7 @@ public sealed class DarkWsTestHost : IAsyncDisposable {
     public IServiceProvider Services => _services;
 
     /// <summary>Gets all published broadcasts, including those with no matching recipient.</summary>
-    public IReadOnlyList<DarkWsBroadcast> Broadcasts => _broadcasts.ToArray();
+    public IReadOnlyList<BroadcastMessage> Broadcasts => _broadcasts.ToArray();
 
     /// <summary>Registers a fake recipient with a fixed session. Configure connections before invoking concurrent actions.</summary>
     public DarkWsTestConnection CreateConnection(IDarkWsSession? session = null, HttpContext? httpContext = null) {

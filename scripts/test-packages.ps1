@@ -15,8 +15,11 @@ Push-Location $repository
 try {
     $packages = (dotnet msbuild DarkWS/DarkWS.csproj -getProperty:DarkWsPackages).Trim().Split(';')
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    # Pack the Release assemblies the gate tested; after test-coverage.ps1 this build is up to date and changes nothing.
+    dotnet build DarkWS.sln -c Release --no-restore
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     foreach ($package in $packages) {
-        dotnet pack "$package/$package.csproj" -c Release --no-restore -o $packageOutput
+        dotnet pack "$package/$package.csproj" -c Release --no-restore --no-build -o $packageOutput
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         $archivePath = Get-Item -LiteralPath (Join-Path $packageOutput "$package.$packageVersion.nupkg")
         $symbolsPath = [System.IO.Path]::ChangeExtension($archivePath.FullName, ".snupkg")
@@ -107,8 +110,14 @@ try {
         npm pack --pack-destination $packageOutput
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         $tarball = Join-Path $packageOutput "darkws-$packageVersion.tgz"
-        $files = tar -tf $tarball
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        # Read the archive with .NET: GNU tar from Git for Windows treats "C:" in the path as a remote host.
+        $stream = [System.IO.Compression.GZipStream]::new([System.IO.File]::OpenRead($tarball), [System.IO.Compression.CompressionMode]::Decompress)
+        try {
+            $reader = [System.Formats.Tar.TarReader]::new($stream)
+            $files = @(while ($null -ne ($entry = $reader.GetNextEntry())) { $entry.Name })
+        } finally {
+            $stream.Dispose()
+        }
         # Source maps point at src, so the sources ship with the package.
         foreach ($required in "package/dist/index.js", "package/dist/index.d.ts", "package/dist/dark-ws.js", "package/dist/dark-ws.d.ts", "package/src/index.ts", "package/src/dark-ws.ts") {
             if ($files -notcontains $required) { throw "npm tarball is missing $required" }

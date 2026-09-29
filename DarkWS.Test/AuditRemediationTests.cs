@@ -221,7 +221,7 @@ public sealed class AuditRemediationTests {
     [Test]
     public async Task CloseHooksObserveTheShutdownDeadline() {
         var hook = new CloseHook();
-        await using var provider = CreateProvider(register: services => services.AddSingleton<DarkWsMiddleware>(hook));
+        await using var provider = CreateProvider(register: services => services.AddSingleton<DarkWsConnectionHooks>(hook));
         var socket = new TestWebSocket();
         socket.EnqueueClose();
         await provider.GetRequiredService<WebSocketHandler>().AcceptAsync(CreateConnection(provider, socket)).WaitAsync(TimeSpan.FromSeconds(2));
@@ -282,7 +282,7 @@ public sealed class AuditRemediationTests {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var socket = new TestWebSocket { SendBarrier = gate.Task };
         using var connection = new WebSocketConnection(socket, new DefaultHttpContext(), null) { SendTimeout = TimeSpan.FromMilliseconds(50) };
-        await Assert.ThrowsAsync<TimeoutException>(async () => await connection.SendAsync([1]));
+        await Assert.ThrowsAsync<TimeoutException>(async () => await connection.SendAsync(new byte[] { 1 }));
         Assert.That(socket.WasAborted, Is.True);
     }
 
@@ -300,15 +300,15 @@ public sealed class AuditRemediationTests {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var socket = new TestWebSocket { SendBarrier = gate.Task, IgnoreSendCancellation = true };
         var connection = new WebSocketConnection(socket, new DefaultHttpContext(), null);
-        var first = connection.SendAsync([1]);
+        var first = connection.SendAsync(new byte[] { 1 });
         await socket.SendStarted.Task;
-        var second = connection.SendAsync([2]);
+        var second = connection.SendAsync(new byte[] { 2 });
         connection.Dispose();
         Assert.That(socket.WasDisposed, Is.False);
         gate.SetResult();
         await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(2));
         Assert.That(socket.WasDisposed, Is.True);
-        await connection.SendAsync([3]);
+        await connection.SendAsync(new byte[] { 3 });
         connection.Dispose();
         Assert.That(socket.Sent, Has.Count.EqualTo(1));
     }
@@ -323,7 +323,7 @@ public sealed class AuditRemediationTests {
             storage.Add(CreateConnection(provider, socket));
         }
 
-        await provider.GetRequiredService<Broadcaster>().DeliverAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "one", null), default);
+        await provider.GetRequiredService<Broadcaster>().DeliverAsync(new BroadcastMessage(BroadcastTargetType.All, null, "one", null), default);
         Assert.That(converter.Writes, Is.EqualTo(1));
         var bytes = sockets[0].SentBuffers.Single();
         Assert.That(sockets.All(socket => ReferenceEquals(socket.SentBuffers.Single(), bytes)), Is.True);
@@ -347,7 +347,7 @@ public sealed class AuditRemediationTests {
         }
 
         using var publisher = new CancellationTokenSource();
-        var broadcast = provider.GetRequiredService<IBroadcaster>().BroadcastAsync("changed", publisher.Token);
+        var broadcast = provider.GetRequiredService<IBroadcaster>().PublishAsync(BroadcastTarget.All, "changed", publisher.Token);
         await Task.WhenAll(sockets.Select(socket => socket.SendStarted.Task)).WaitAsync(TimeSpan.FromSeconds(2));
         publisher.Cancel();
         gate.SetResult();
@@ -369,7 +369,7 @@ public sealed class AuditRemediationTests {
             storage.Add(CreateConnection(provider, socket));
         }
 
-        var delivery = provider.GetRequiredService<Broadcaster>().DeliverAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "changed", null), default).AsTask();
+        var delivery = provider.GetRequiredService<Broadcaster>().DeliverAsync(new BroadcastMessage(BroadcastTargetType.All, null, "changed", null), default).AsTask();
         // More recipients than processors all start at once, so held sockets do not delay the rest.
         await Task.WhenAll(sockets.Select(socket => socket.SendStarted.Task)).WaitAsync(TimeSpan.FromSeconds(2));
         gate.SetResult();
@@ -479,7 +479,7 @@ public sealed class AuditRemediationTests {
         var socket = new TestWebSocket();
         storage.Add(new TransportlessConnection());
         storage.Add(CreateConnection(provider, socket));
-        await provider.GetRequiredService<Broadcaster>().DeliverAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "changed", null), default).AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+        await provider.GetRequiredService<Broadcaster>().DeliverAsync(new BroadcastMessage(BroadcastTargetType.All, null, "changed", null), default).AsTask().WaitAsync(TimeSpan.FromSeconds(2));
         Assert.That(socket.Sent, Has.Count.EqualTo(1));
         Assert.That(provider.GetRequiredService<Probe>().Logs, Has.Some.Contains("Cannot abort"));
         foreach (var connection in storage.GetAll()) {
@@ -509,7 +509,7 @@ public sealed class AuditRemediationTests {
         var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(CreateConnection(provider, socket));
         socket.EnqueueReceive("{\"id\":\"empty\",\"action\":\"audit:nullable\"}");
         await UntilAsync(() => socket.Sent.Count == 1);
-        await provider.GetRequiredService<IBroadcaster>().BroadcastAsync<object?>("changed", null);
+        await provider.GetRequiredService<IBroadcaster>().PublishAsync<object?>(BroadcastTarget.All, "changed", null);
         await UntilAsync(() => socket.Sent.Count == 2);
         Assert.That(socket.Sent.Select(Encoding.UTF8.GetString), Is.EqualTo(new[] { "{\"id\":\"empty\",\"data\":null}", "{\"id\":\"@\",\"action\":\"changed\",\"data\":null}" }));
         socket.EnqueueClose();
@@ -519,11 +519,11 @@ public sealed class AuditRemediationTests {
     [Test]
     public void BroadcastEnvelopeKeepsExplicitNullApartFromMissingData() {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-        var none = JsonSerializer.Serialize(new DarkWsBroadcast(DarkWsTarget.All, null, "a", null), options);
-        var explicitNull = JsonSerializer.Serialize(new DarkWsBroadcast(DarkWsTarget.All, null, "a", JsonSerializer.SerializeToElement<object?>(null)), options);
+        var none = JsonSerializer.Serialize(new BroadcastMessage(BroadcastTargetType.All, null, "a", null), options);
+        var explicitNull = JsonSerializer.Serialize(new BroadcastMessage(BroadcastTargetType.All, null, "a", JsonSerializer.SerializeToElement<object?>(null)), options);
         Assert.That(none, Does.Not.Contain("data"));
-        Assert.That(JsonSerializer.Deserialize<DarkWsBroadcast>(none, options)!.Data, Is.Null);
-        Assert.That(JsonSerializer.Deserialize<DarkWsBroadcast>(explicitNull, options)!.Data?.ValueKind, Is.EqualTo(JsonValueKind.Null));
+        Assert.That(JsonSerializer.Deserialize<BroadcastMessage>(none, options)!.Data, Is.Null);
+        Assert.That(JsonSerializer.Deserialize<BroadcastMessage>(explicitNull, options)!.Data?.ValueKind, Is.EqualTo(JsonValueKind.Null));
     }
 
     [TestCase(false)]
@@ -534,7 +534,7 @@ public sealed class AuditRemediationTests {
             if (keepSession) {
                 options.KeepSessionOnFailedAuthentication = true;
             }
-        }, services => services.AddSingleton<DarkWsMiddleware>(hook));
+        }, services => services.AddSingleton<DarkWsConnectionHooks>(hook));
         var socket = new TestWebSocket();
         var connection = CreateConnection(provider, socket);
         var storage = provider.GetRequiredService<ConnectionStorage>();
@@ -621,7 +621,7 @@ public sealed class AuditRemediationTests {
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) => Logs.Enqueue(formatter(state, exception));
     }
 
-    public sealed class CloseHook : DarkWsMiddleware {
+    public sealed class CloseHook : DarkWsConnectionHooks {
         public TaskCompletionSource<bool> CancelledOnEntry { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public override async Task OnCloseAsync(IDarkWsContextAccessor context) {
@@ -632,7 +632,7 @@ public sealed class AuditRemediationTests {
         }
     }
 
-    public sealed class AuthenticationHook : DarkWsMiddleware {
+    public sealed class AuthenticationHook : DarkWsConnectionHooks {
         public int Calls;
         public override Task OnAuthenticatedAsync(IDarkWsContextAccessor context, IDarkWsSession? previousSession) {
             Calls++;
@@ -730,12 +730,11 @@ public sealed class AuditRemediationTests {
 
     private sealed class TransportlessConnection : IWebSocketConnection {
         public string Id { get; } = Guid.NewGuid().ToString("N");
-        public WebSocket WebSocket => throw new NotSupportedException("This connection has no transport");
         public HttpContext HttpContext { get; } = new DefaultHttpContext();
         public IDarkWsSession? Session => null;
         public bool IsOpen => true;
-        public Task<ReceivedMessage> ReceiveMessageAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task SendAsync(byte[] data, CancellationToken cancellationToken = default) => Task.Delay(Timeout.Infinite, cancellationToken);
+        public Task SendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) => Task.Delay(Timeout.Infinite, cancellationToken);
+        public void Abort() => throw new NotSupportedException("This connection has no transport");
         public Task CloseAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public void Dispose() { }
     }

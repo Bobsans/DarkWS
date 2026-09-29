@@ -356,6 +356,83 @@ public sealed class ClientTests {
     }
 
     [Test]
+    public async Task FailingSubscriberWithSlowErrorHandlerKeepsTheErrorQueueBounded() {
+        const int capacity = 16;
+        const int notifications = 10_000;
+        await using var server = await TestServer.StartAsync();
+        await using var client = Client(server, options => options.NotificationQueueCapacity = capacity);
+        using var release = new ManualResetEventSlim();
+        var delivered = 0;
+        var errors = 0;
+        client.Error += (_, _) => {
+            Interlocked.Increment(ref errors);
+            release.Wait(TimeSpan.FromSeconds(30));
+        };
+        using var subscription = client.On<int>("n", _ => {
+            Interlocked.Increment(ref delivered);
+            throw new InvalidOperationException("subscriber");
+        });
+        await client.ConnectAsync();
+        var socket = await server.AcceptAsync();
+        const string broadcast = "{\"id\":\"@\",\"action\":\"n\",\"data\":1}";
+        // Batches keep the notification queue itself below its capacity.
+        for (var sent = 0; sent < notifications; sent += capacity / 2) {
+            for (var index = 0; index < capacity / 2; index++) {
+                await TestServer.SendAsync(socket, broadcast);
+            }
+
+            var target = sent + capacity / 2;
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (Volatile.Read(ref delivered) < target && DateTime.UtcNow < deadline) {
+                await Task.Yield();
+            }
+        }
+
+        Assert.That(Volatile.Read(ref delivered), Is.EqualTo(notifications));
+        Assert.That(client.State, Is.EqualTo(DarkWsClientState.Connected));
+        release.Set();
+        var settle = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < settle && Volatile.Read(ref errors) < capacity + 1) {
+            await Task.Delay(10);
+        }
+
+        await Task.Delay(100);
+        // One blocked handler call plus at most `capacity` queued errors; the rest were dropped.
+        Assert.That(Volatile.Read(ref errors), Is.InRange(2, capacity + 1));
+    }
+
+    [Test]
+    public async Task LogoutRejectedByThePendingLimitKeepsAutomaticAuthentication() {
+        await using var server = await TestServer.StartAsync();
+        var calls = 0;
+        await using var client = Client(server, options => {
+            options.MaxPendingRequests = 1;
+            options.RequestTimeout = Timeout.InfiniteTimeSpan;
+            options.AuthenticationTokenProvider = _ => {
+                Interlocked.Increment(ref calls);
+                return ValueTask.FromResult<string?>("valid");
+            };
+        });
+        var request = client.RequestAsync<int>("slow");
+        var first = await server.AcceptAsync();
+        Assert.That(await TestServer.ReadAsync(first), Is.EqualTo("auth:valid"));
+        await TestServer.SendAsync(first, "auth:success");
+        var pending = await TestServer.RequestAsync(first);
+
+        await Assert.ThrowsAsync<DarkWsClientLimitException>(() => client.LogoutAsync());
+        await TestServer.ReplyAsync(first, pending);
+        Assert.That(await request, Is.EqualTo(42));
+
+        await client.CloseAsync();
+        var connect = client.ConnectAsync();
+        var second = await server.AcceptAsync();
+        Assert.That(await TestServer.ReadAsync(second), Is.EqualTo("auth:valid"));
+        await TestServer.SendAsync(second, "auth:success");
+        await connect;
+        Assert.That(calls, Is.EqualTo(2));
+    }
+
+    [Test]
     public async Task SystemCommandsUseTextAndSerializeAcknowledgements() {
         await using var server = await TestServer.StartAsync();
         await using var client = Client(server);

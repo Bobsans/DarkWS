@@ -26,6 +26,14 @@ public static class DarkWsEndpointRouteBuilderExtensions {
             }
 
             var options = context.RequestServices.GetRequiredService<IOptions<DarkWsOptions>>().Value;
+            // Checked before authentication: a cross-site page must not reach the authenticator with the user's cookies.
+            var origin = context.Request.Headers.Origin.ToString();
+            if (options.AllowedOrigins.Count > 0 && origin.Length > 0
+                && !options.AllowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase)) {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+
             var lifetime = context.RequestServices.GetRequiredService<IHostApplicationLifetime>();
             using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
                 context.RequestAborted,
@@ -63,8 +71,13 @@ public static class DarkWsEndpointRouteBuilderExtensions {
                 ReceiveIdleTimeout = options.ReceiveIdleTimeout
 #endif
             };
-            await context.RequestServices.GetRequiredService<WebSocketHandler>()
-                .AcceptAsync(connection, cancellation.Token);
+            try {
+                await context.RequestServices.GetRequiredService<WebSocketHandler>()
+                    .AcceptAsync(connection, cancellation.Token);
+            } finally {
+                // The request ends when this delegate returns; handlers still running past shutdown must not use it.
+                connection.CompleteUpgradeRequest();
+            }
         });
     }
 }

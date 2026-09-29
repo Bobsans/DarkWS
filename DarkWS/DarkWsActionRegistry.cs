@@ -12,7 +12,8 @@ internal sealed class DarkWsActionRegistry {
     }
 
     public void Add(Type type) {
-        if (type.GetCustomAttributes(inherit: true).OfType<IAuthorizeData>().Any()) {
+        var handlerAttributes = Array.AsReadOnly(type.GetCustomAttributes(inherit: true).OfType<Attribute>().ToArray());
+        if (handlerAttributes.OfType<IAuthorizeData>().Any()) {
             throw new InvalidOperationException($"Handler '{type.FullName}' uses unsupported [Authorize] metadata. DarkWS supports only [AllowAnonymous]; enforce policies and roles inside actions");
         }
 
@@ -52,7 +53,7 @@ internal sealed class DarkWsActionRegistry {
             }
 
             var allowAnonymous = classAllowsAnonymous || method.GetCustomAttribute<AllowAnonymousAttribute>() is not null;
-            _actions.Add(key, CreateDescriptor(new DarkWsActionInfo(key, type, method), parameters.FirstOrDefault()?.ParameterType, allowAnonymous));
+            _actions.Add(key, CreateDescriptor(new DarkWsActionInfo(key, type, method, handlerAttributes), parameters.FirstOrDefault()?.ParameterType, allowAnonymous));
         }
     }
 

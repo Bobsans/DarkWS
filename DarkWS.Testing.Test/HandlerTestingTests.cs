@@ -93,9 +93,9 @@ public sealed class HandlerTestingTests {
         Assert.That(handler.OptionalAspNetSession, Is.Null);
         Assert.That(scope.Services.GetRequiredService<IDarkWsContextAccessor>().Action, Is.Null);
         await handler.Broadcasts();
-        Assert.That(host.Broadcasts.Select(message => message.Target), Is.EqualTo(new[] {
-            DarkWsTarget.All, DarkWsTarget.All, DarkWsTarget.Connection, DarkWsTarget.Connection,
-            DarkWsTarget.Session, DarkWsTarget.Session, DarkWsTarget.Group, DarkWsTarget.Group
+        Assert.That(host.Broadcasts.Select(message => message.TargetType), Is.EqualTo(new[] {
+            BroadcastTargetType.All, BroadcastTargetType.All, BroadcastTargetType.Connection, BroadcastTargetType.Connection,
+            BroadcastTargetType.Session, BroadcastTargetType.Session, BroadcastTargetType.Group, BroadcastTargetType.Group
         }));
         Assert.That(connection.SentMessages, Has.Count.EqualTo(8));
         Assert.That(sameSession.SentMessages, Has.Count.EqualTo(6));
@@ -139,15 +139,12 @@ public sealed class HandlerTestingTests {
         await connection.SendAsync(buffer);
         buffer[0] = 3;
         Assert.That(connection.SentMessages.Single(), Is.EqualTo(new byte[] { 1, 2 }));
-        Assert.Throws<ArgumentNullException>(() => connection.SendAsync(null!));
-        Assert.Throws<NotSupportedException>(() => _ = connection.WebSocket);
-        Assert.Throws<NotSupportedException>(() => connection.ReceiveMessageAsync());
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
-        Assert.Throws<OperationCanceledException>(() => connection.SendAsync([], cancelled.Token));
+        Assert.Throws<OperationCanceledException>(() => connection.SendAsync(ReadOnlyMemory<byte>.Empty, cancelled.Token));
         Assert.Throws<OperationCanceledException>(() => connection.CloseAsync(cancelled.Token));
         await connection.CloseAsync();
-        await connection.SendAsync([]);
+        await connection.SendAsync(ReadOnlyMemory<byte>.Empty);
         Assert.That(connection.IsOpen, Is.False);
         Assert.That(connection.SentMessages, Has.Count.EqualTo(1));
         connection.Abort();
@@ -228,7 +225,7 @@ public sealed class HandlerTestingTests {
         public IResponse Blocked() => throw new AssertionException("The filter must short-circuit.");
         [Action("broadcast")]
         public async Task<IResponse> Broadcast() {
-            await BroadcastToSelfAsync("changed", Session.Id);
+            await PublishAsync(Self, "changed", Session.Id);
             return Ok();
         }
         [Action("wait")]
@@ -244,16 +241,16 @@ public sealed class HandlerTestingTests {
             (Session, HttpContext, Connection, ConnectionAborted, Services);
         public ISession? OptionalAspNetSession => AspNetSession;
         public async Task Broadcasts() {
-            await BroadcastAsync("all");
-            await BroadcastAsync<string?>("all", null);
-            await BroadcastToSelfAsync("self");
-            await BroadcastToSelfAsync("self", 1);
-            await BroadcastToSessionAsync(Session.Id, "session");
-            await BroadcastToSessionAsync(Session.Id, "session", 2);
-            await BroadcastToGroupAsync("group", "group");
-            await BroadcastToGroupAsync("group", "group", 3);
+            await PublishAsync(BroadcastTarget.All, "all");
+            await PublishAsync<string?>(BroadcastTarget.All, "all", null);
+            await PublishAsync(Self, "self");
+            await PublishAsync(Self, "self", 1);
+            await PublishAsync(BroadcastTarget.Session(Session.Id), "session");
+            await PublishAsync(BroadcastTarget.Session(Session.Id), "session", 2);
+            await PublishAsync(BroadcastTarget.Group("group"), "group");
+            await PublishAsync(BroadcastTarget.Group("group"), "group", 3);
         }
-        public Task MissingRecipient() => BroadcastToSessionAsync("missing", "missing");
+        public Task MissingRecipient() => PublishAsync(BroadcastTarget.Session("missing"), "missing");
     }
 
     public sealed class TestSession(string id, string[] groups, bool authenticated = true) : IDarkWsSession {

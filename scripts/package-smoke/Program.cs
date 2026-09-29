@@ -29,15 +29,15 @@ await using (var testing = new DarkWsTestHost(darkWs => darkWs.AddHandlersFromAs
         throw new InvalidOperationException("The installed testing package failed direct handler initialization.");
     var sender = testing.CreateConnection(new SmokeGroupSession());
     var recipient = testing.CreateConnection(new SmokeGroupSession());
-    await testing.Services.GetRequiredService<IBroadcaster>().BroadcastToGroupsAsync(
-        ["a", "b", "a"], "changed", except: new DarkWsBroadcastExclusion { ConnectionId = sender.Id });
+    await testing.Services.GetRequiredService<IBroadcaster>().PublishAsync(
+        BroadcastTarget.Groups(["a", "b", "a"]).ExceptConnection(sender.Id), "changed");
     if (sender.SentMessages.Count != 0 || recipient.SentMessages.Count != 1 || testing.Broadcasts.Count != 1)
         throw new InvalidOperationException("The installed package failed group union or exclusion delivery.");
 }
 services.AddDarkWs(options => options.MaxMessageSizeBytes = 65536)
-    .AddHandlersFromAssemblyContaining<PackageHandler>();
+    .AddHandlersFromAssemblyContaining<PackageHandler>()
+    .AddRedis("package-smoke");
 services.Configure<DarkWsOptions>(options => options.MaxMessageSizeBytes = 777);
-services.AddDarkWsRedis("package-smoke");
 using var provider = services.BuildServiceProvider();
 if (provider.GetRequiredService<IOptions<DarkWsOptions>>().Value.MaxMessageSizeBytes != 777)
     throw new InvalidOperationException("The installed package ignored Configure<DarkWsOptions>");
@@ -46,7 +46,7 @@ try {
     throw new Exception("The installed package allowed duplicate registration");
 } catch (InvalidOperationException) { }
 using IWebSocketConnection connection = new ConsumerConnection();
-await connection.SendAsync([1]);
+await connection.SendAsync(new byte[] { 1 });
 if (new ErrorResponseException("domain:error").Message != "domain:error")
     throw new InvalidOperationException("The installed package lost the domain error message");
 var builder = WebApplication.CreateBuilder();
@@ -80,13 +80,12 @@ public sealed class PackageHandler : HandlerBase {
 
 public sealed class ConsumerConnection : IWebSocketConnection {
     public string Id => "consumer";
-    public WebSocket WebSocket => throw new NotSupportedException("No transport in this test double");
     public HttpContext HttpContext { get; } = new DefaultHttpContext();
     public IDarkWsSession? Session => null;
     public bool IsOpen => true;
-    public Task<ReceivedMessage> ReceiveMessageAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
-    public Task SendAsync(byte[] data, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task SendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task CloseAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public void Abort() { }
     public void Dispose() { }
 }
 

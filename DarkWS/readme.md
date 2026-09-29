@@ -3,11 +3,11 @@
 ASP.NET Core WebSocket request/response library with typed sessions and an
 in-memory broadcast backplane.
 
-`BroadcastToGroupsAsync(groups, action, data, except: new DarkWsBroadcastExclusion { ConnectionId = Connection.Id })`
-publishes once to a group union and excludes the calling connection. Use `SessionId`
-to exclude all connections in a session, or set both ids. The no-data overload and
-matching `BroadcastToGroupAsync(..., except: ...)` overloads are also available on
-`IBroadcaster` and `HandlerBase`. Use the named `except` argument for exclusions.
+`PublishAsync(BroadcastTarget.Groups(groups).ExceptConnection(Connection.Id), action, data)`
+publishes once to a group union and excludes the calling connection. Use
+`ExceptSession` to exclude all connections in a session, or chain both. `Group`,
+`Session`, `Connection`, and `All` targets and a no-data overload are also available
+on `IBroadcaster` and `HandlerBase`; only group targets take exclusions.
 Overlapping groups receive one notification per connection. Empty groups publish
 nothing; null collections and blank group names/exclusion ids are invalid.
 Upgrade all Redis-connected nodes before using the new Groups=4 envelope; old nodes
@@ -41,7 +41,7 @@ public sealed record AppSession(
 public sealed class MessageHandler : HandlerBase<AppSession> {
     [Action("send")]
     public async Task<IResponse> SendAsync(MessageInput input) {
-        await BroadcastToGroupAsync($"account:{Session.AccountId}", "message:created", input);
+        await PublishAsync(BroadcastTarget.Group($"account:{Session.AccountId}"), "message:created", input);
         return Ok();
     }
 }
@@ -123,8 +123,9 @@ types or disable JSON type/range validation. Invalid payloads return
 `darkws:error:invalid-request` before constructing or invoking the handler.
 
 An injected `IDarkWsContextAccessor` is initialized only inside a message scope.
-Other scopes receive `InvalidOperationException` on property access. Lifecycle
-middleware should use the context supplied to its hook.
+Other scopes receive `InvalidOperationException` on property access. Connection
+hooks (`DarkWsConnectionHooks`, registered with `AddConnectionHooks<T>()`) should use
+the context supplied to them.
 
 ## Action filters and metadata
 
@@ -139,14 +140,25 @@ services.AddDarkWs()
     .AddActionFilter<AppActionFilter>();
 ```
 
-Filters run after action lookup, authorization, payload binding, and scope
-initializers. They do not run for malformed JSON, unknown actions, unauthorized
-requests, or invalid payloads. `DarkWsActionContext` exposes the registered
-action name, handler type, method and method attributes through `Action`, plus
-the deserialized `Payload`, captured `Session`, message `Services`, and
-`CancellationToken`. `IDarkWsContextAccessor.Action` exposes the same metadata
-to scope initializers and scoped services; it is null in connection lifecycle
-hooks. `HandlerBase.Services` is the current message scope's service provider.
+Action filters run after action lookup, authorization, payload binding, and scope
+initializers. `DarkWsActionContext` exposes the registered action name, handler
+type, method, method `Attributes`, and handler-class `HandlerAttributes` through
+`Action`, plus the client `RequestId`, the deserialized `Payload` and the received
+`RawPayload`, captured `Session`, message `Services`, and `CancellationToken`.
+`IDarkWsContextAccessor.Action` exposes the same metadata to scope initializers and
+scoped services; it is null in connection lifecycle hooks. `HandlerBase.Services` is
+the current message scope's service provider.
+
+For metrics and tracing, register request filters with `AddRequestFilter<TFilter>()`.
+They wrap every well-formed request in its message scope, outermost first, and also
+see requests rejected before any action filter runs: unknown actions (`Action` is
+null), missing authorization, and invalid payloads arrive as an `ErrorResponse`
+whose `Error` is the configured code; a failing scope initializer, action filter, or
+handler arrives as the exception, which DarkWS answers with `RequestFailedError`
+(or the `DarkWsException` response) after the filters. `DarkWsRequestContext`
+carries `RequestId`, the client's `ActionName`, `RawPayload`, `Session`, `Services`,
+and `CancellationToken`. Malformed JSON and busy rejections are answered before a
+message scope exists and do not reach any filter.
 
 ## Response handling
 
@@ -180,18 +192,16 @@ During upgrade, authenticator exceptions are logged and return HTTP 401 by defau
 `AcceptAnonymousOnUpgradeAuthenticationException = true` instead accepts an anonymous
 connection with no session. A null authenticator result continues to allow anonymous
 upgrade regardless of this option. Request/shutdown cancellation is propagated.
-JSON authentication/logout actions and `@auth` replies are no longer used.
-The obsolete `AuthenticationFailedError` option is unused and no longer validated;
-empty values do not prevent startup. Remove it from configuration and code: text
-authentication always replies `auth:failed`, and the option will be removed in the
-next major version.
+JSON authentication/logout actions and `@auth` replies are no longer used; text
+authentication always replies `auth:failed`.
 Token expiry and revocation enforcement remain the application's responsibility,
 including when a failed refresh retains the previous session;
 already running actions are not rolled back.
 
-Session and group indexes refresh on registration and re-authentication. Re-add
-the connection with `ConnectionStorage.Add` after external group changes; closed
-connections are ignored, so a refresh racing with disconnect cannot re-register them.
+Session and group indexes refresh on registration and re-authentication. Call
+`IDarkWsConnections.Refresh(connection)` after external group changes; closed and
+unregistered connections are ignored, so a refresh racing with disconnect cannot
+re-register them.
 XML API documentation and `.snupkg` symbols with embedded sources are included.
 
 ## Compatibility and diagnostics

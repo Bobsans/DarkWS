@@ -9,9 +9,28 @@ cannot silently disable the analyzer.
 
 `PublicAPI.Shipped.txt` records the released 4.0.0 surface. The initial 2.1.0
 baseline and reviewed migration remain available in Git history;
-`PublicAPI.Unshipped.txt` is reserved for changes after 4.0.0. The old extension
-syntax moved to dedicated classes, while legacy static forwarding methods remain
-binary-callable and are deprecated for removal in a future major release.
+`PublicAPI.Unshipped.txt` is reserved for changes after 4.0.0. 5.0.0 removes the
+legacy static forwarding classes `Configuration` and `RedisConfiguration`, and wire
+envelope records are internal: the JSON protocol is documented in the README, not
+as .NET types.
+
+## Naming
+
+Public types belong to one of three families; a new type follows the nearest one.
+
+- Configuration and infrastructure keep the `DarkWs` prefix, because their plain
+  names would clash with ASP.NET or application types: options, builder, session,
+  context, authenticator, backplane, connections, protocol, hooks, the base
+  exception, and the test host (`DarkWsOptions`, `IDarkWsSession`, `DarkWsConnectionHooks`).
+- Handler-authoring types have short names: `HandlerBase`, `HandlerAttribute`,
+  `ActionAttribute`, `IResponse`, `SuccessResponse`, `ErrorResponse`, `ResponseContext`,
+  `ErrorResponseException`, and `IWebSocketConnection`.
+- Broadcast types use the `Broadcast` prefix: `BroadcastTarget`, `BroadcastTargetType`,
+  `BroadcastExclusion`, `BroadcastMessage`, and the service `IBroadcaster`.
+
+The same concept keeps the same member name on every type: a recipient kind is
+`Type` (`TargetType` on the envelope), its key `Id` (`TargetId`), a group union
+`GroupNames`, and exclusions `Except`.
 
 The new client and DI packages record their complete initial 4.0.0 API in Shipped.
 The client's initial request overloads intentionally distinguish omitted payload

@@ -28,7 +28,7 @@ public sealed class TestHandler(
 
     [Action("broadcast")]
     public async Task<IResponse> BroadcastAsync(string action) {
-        await BroadcastToSelfAsync(action);
+        await PublishAsync(Self, action);
         return Ok();
     }
 
@@ -54,7 +54,7 @@ public sealed class LifecycleProbe {
     public volatile string? PreviousSessionId;
 }
 
-public sealed class TestMiddleware(LifecycleProbe probe) : DarkWsMiddleware {
+public sealed class TestConnectionHooks(LifecycleProbe probe) : DarkWsConnectionHooks {
     public override Task OnOpenAsync(IDarkWsContextAccessor context) {
         Interlocked.Increment(ref probe.OpenCount);
         return Task.CompletedTask;

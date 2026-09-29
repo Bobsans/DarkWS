@@ -4,14 +4,14 @@ namespace DarkWS.Abstractions;
 public interface IDarkWsBackplane {
     /// <summary>Publishes one targeted broadcast through the backplane.</summary>
     ValueTask PublishAsync(
-        DarkWsBroadcast message,
+        BroadcastMessage message,
         CancellationToken cancellationToken = default
     );
 
     /// <summary>Installs a local listener receiving messages and their cancellation tokens.</summary>
     /// <remarks>The Redis implementation rejects duplicate subscriptions. Its token controls subscription lifetime; unsubscribing cancels active delivery.</remarks>
     ValueTask SubscribeAsync(
-        Func<DarkWsBroadcast, CancellationToken, ValueTask> listener,
+        Func<BroadcastMessage, CancellationToken, ValueTask> listener,
         CancellationToken cancellationToken = default
     );
 

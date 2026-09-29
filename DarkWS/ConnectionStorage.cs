@@ -2,8 +2,8 @@ using DarkWS.Abstractions;
 
 namespace DarkWS;
 
-/// <summary>Thread-safe local registry with session and group indexes. Re-add a connection to refresh externally changed membership.</summary>
-public sealed class ConnectionStorage {
+/// <summary>Thread-safe local registry with session and group indexes.</summary>
+internal sealed class ConnectionStorage : IDarkWsConnections {
     private readonly object _sync = new();
     private readonly Dictionary<string, Entry> _connections = new(StringComparer.Ordinal);
     private readonly Dictionary<string, HashSet<string>> _sessions = new(StringComparer.Ordinal);
@@ -11,10 +11,17 @@ public sealed class ConnectionStorage {
 
     /// <summary>Adds or replaces an open connection by id and refreshes its session/group indexes. A closed connection is ignored.</summary>
     public IWebSocketConnection Add(IWebSocketConnection connection) {
+        Index(connection, registeredOnly: false);
+        return connection;
+    }
+
+    public bool Refresh(IWebSocketConnection connection) => Index(connection, registeredOnly: true);
+
+    private bool Index(IWebSocketConnection connection, bool registeredOnly) {
         ArgumentNullException.ThrowIfNull(connection);
         while (true) {
             if (!connection.IsOpen) {
-                return connection;
+                return false;
             }
 
             var session = connection.Session;
@@ -22,7 +29,10 @@ public sealed class ConnectionStorage {
             lock (_sync) {
                 // A refresh racing with shutdown must not re-register a connection that was already removed.
                 if (!connection.IsOpen) {
-                    return connection;
+                    return false;
+                }
+                if (registeredOnly && !(_connections.TryGetValue(connection.Id, out var current) && ReferenceEquals(current.Connection, connection))) {
+                    return false;
                 }
                 // Re-authentication may have replaced the session while its groups were being read.
                 if (!ReferenceEquals(session, connection.Session)) {
@@ -30,7 +40,7 @@ public sealed class ConnectionStorage {
                 }
 
                 AddEntry(entry);
-                return connection;
+                return true;
             }
         }
     }
@@ -84,9 +94,13 @@ public sealed class ConnectionStorage {
 
     /// <summary>Returns the matching connection or an empty snapshot.</summary>
     public IReadOnlyCollection<IWebSocketConnection> GetByConnection(string connectionId) {
+        return Find(connectionId) is { } connection ? [connection] : [];
+    }
+
+    public IWebSocketConnection? Find(string connectionId) {
         ArgumentNullException.ThrowIfNull(connectionId);
         lock (_sync) {
-            return _connections.TryGetValue(connectionId, out var entry) ? [entry.Connection] : [];
+            return _connections.TryGetValue(connectionId, out var entry) ? entry.Connection : null;
         }
     }
 
@@ -111,7 +125,7 @@ public sealed class ConnectionStorage {
     }
 
     // Select and exclude from one indexed snapshot, including the session used to index each connection.
-    internal IReadOnlyCollection<IWebSocketConnection> GetByGroups(IReadOnlyList<string> groups, DarkWsBroadcastExclusion? except) {
+    internal IReadOnlyCollection<IWebSocketConnection> GetByGroups(IReadOnlyList<string> groups, BroadcastExclusion? except) {
         lock (_sync) {
             var ids = new HashSet<string>(StringComparer.Ordinal);
             foreach (var group in groups) {

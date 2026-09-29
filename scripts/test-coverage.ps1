@@ -14,7 +14,8 @@ try {
     dotnet restore DarkWS.sln
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    dotnet build DarkWS.sln --no-restore
+    # Test the Release build that test-packages.ps1 packs, not a separate Debug build.
+    dotnet build DarkWS.sln -c Release --no-restore
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     $packages = (dotnet msbuild DarkWS/DarkWS.csproj -getProperty:DarkWsPackages).Trim().Split(';')
@@ -34,7 +35,7 @@ try {
 "@ | Set-Content -LiteralPath $settingsPath -Encoding utf8
 
     dotnet tool run dotnet-coverage collect `
-        "dotnet test DarkWS.sln --no-build" `
+        "dotnet test DarkWS.sln -c Release --no-build" `
         --settings $settingsPath `
         -f cobertura `
         -o $coveragePath

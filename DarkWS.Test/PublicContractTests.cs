@@ -31,12 +31,12 @@ public sealed class PublicContractTests {
         Assert.That(empty.GetProperty("id").GetString(), Is.EqualTo("@"));
     }
 
-    [TestCase(DarkWsTarget.All, 0)]
-    [TestCase(DarkWsTarget.Connection, 1)]
-    [TestCase(DarkWsTarget.Session, 2)]
-    [TestCase(DarkWsTarget.Group, 3)]
-    public void BroadcastWireValuesAndNamesAreStable(DarkWsTarget target, int code) {
-        var json = JsonSerializer.SerializeToElement(new DarkWsBroadcast(target, "id", "event", null), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower });
+    [TestCase(BroadcastTargetType.All, 0)]
+    [TestCase(BroadcastTargetType.Connection, 1)]
+    [TestCase(BroadcastTargetType.Session, 2)]
+    [TestCase(BroadcastTargetType.Group, 3)]
+    public void BroadcastWireValuesAndNamesAreStable(BroadcastTargetType target, int code) {
+        var json = JsonSerializer.SerializeToElement(new BroadcastMessage(target, "id", "event", null), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower });
         Assert.That((int)target, Is.EqualTo(code));
         Assert.That(json.GetProperty("target").GetInt32(), Is.EqualTo(code));
         Assert.That(json.GetProperty("targetId").GetString(), Is.EqualTo("id"));
@@ -77,6 +77,8 @@ public sealed class PublicContractTests {
         var cases = new (Action Call, string Parameter)[] {
             (() => storage.Add(null!), "connection"),
             (() => storage.Remove(null!), "connection"),
+            (() => storage.Refresh(null!), "connection"),
+            (() => storage.Find(null!), "connectionId"),
             (() => storage.GetByConnection(null!), "connectionId"),
             (() => storage.GetBySession(null!), "sessionId"),
             (() => storage.GetByGroup(null!), "group"),
@@ -98,7 +100,6 @@ public sealed class PublicContractTests {
             Assert.That(Assert.Throws<ArgumentNullException>(call)!.ParamName, Is.EqualTo(parameter));
         }
 
-        Assert.That((await Assert.ThrowsAsync<ArgumentNullException>(async () => await connection.SendAsync(null!)))!.ParamName, Is.EqualTo("data"));
         foreach (var response in new IResponse[] { new SuccessResponse(), new SuccessResponse<int>(1), new ErrorResponse("error"), new ErrorResponse<int>("error", 1) }) {
             Assert.That(Assert.Throws<ArgumentNullException>(() => response.WriteResultAsync(null!))!.ParamName, Is.EqualTo("context"));
         }
@@ -119,47 +120,12 @@ public sealed class PublicContractTests {
         }
     }
 
-    [TestCase(null)]
-    [TestCase("")]
-    [TestCase(" ")]
-    public async Task UnusedAuthenticationFailedErrorDoesNotPreventStartup(string? value) {
-        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
-#pragma warning disable CS0618 // Verify configuration compatibility for the obsolete option.
-        builder.Services.AddDarkWs(options => options.AuthenticationFailedError = value!);
-#pragma warning restore CS0618
-        using var host = builder.Build();
-        await host.StartAsync();
-        await host.StopAsync();
-    }
-
-    [Test]
-    public void AuthenticationFailedErrorIsObsoleteWithAWarning() {
-        var property = typeof(DarkWsOptions).GetProperty("AuthenticationFailedError")!;
-        var obsolete = property.GetCustomAttribute<ObsoleteAttribute>();
-        Assert.That(obsolete, Is.Not.Null);
-        Assert.That(obsolete!.IsError, Is.False);
-        Assert.That(obsolete.Message, Does.Contain("auth:failed"));
-    }
-
     [Test]
     public void NullJsonOptionsFailValidation() {
         var services = new ServiceCollection();
         services.AddDarkWs(options => options.JsonOptions = null!);
         using var provider = services.BuildServiceProvider();
         Assert.Throws<OptionsValidationException>(() => _ = provider.GetRequiredService<IOptions<DarkWsOptions>>().Value);
-    }
-
-    [Test]
-    public void LegacyStaticRegistrationForwardsWithoutExtensionAmbiguity() {
-        var wrapper = typeof(DarkWsBuilder).Assembly.GetType("DarkWS.Configuration")!;
-        var method = wrapper.GetMethod("AddDarkWs")!;
-        Assert.That(wrapper.GetCustomAttribute<ObsoleteAttribute>(), Is.Not.Null);
-        Assert.That(method.IsDefined(typeof(ExtensionAttribute)), Is.False);
-        var services = new ServiceCollection();
-        var builder = method.Invoke(null, [services, null]);
-        Assert.That(builder, Is.TypeOf<DarkWsBuilder>());
-        using var provider = services.BuildServiceProvider();
-        Assert.That(provider.GetRequiredService<IOptions<DarkWsOptions>>().Value.MaxMessageSizeBytes, Is.Positive);
     }
 
     [Test]

@@ -2,8 +2,8 @@ using DarkWS.Abstractions;
 
 namespace DarkWS;
 
-/// <summary>Connection lifecycle hooks. Use the supplied context; an injected message context is uninitialized in this scope.</summary>
-public abstract class DarkWsMiddleware {
+/// <summary>Connection lifecycle hooks registered with DarkWsBuilder.AddConnectionHooks. Use the supplied context; an injected message context is uninitialized in this scope.</summary>
+public abstract class DarkWsConnectionHooks {
     /// <summary>Runs after connection registration with an initialized context.</summary>
     public virtual Task OnOpenAsync(IDarkWsContextAccessor context) => Task.CompletedTask;
 

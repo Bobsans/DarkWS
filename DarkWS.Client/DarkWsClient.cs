@@ -27,6 +27,7 @@ public sealed partial class DarkWsClient : IDarkWsClient {
     private bool _automaticAuthentication = true;
     private long _authenticationVersion;
     private int _pendingCount;
+    private int _queuedErrors;
 
     /// <summary>Creates a client using default settings. No connection is opened.</summary>
     public DarkWsClient(Uri endpoint) : this(new DarkWsClientOptions { Endpoint = endpoint }) { }
@@ -354,12 +355,6 @@ public sealed partial class DarkWsClient : IDarkWsClient {
 
     /// <inheritdoc />
     public Task LogoutAsync(CancellationToken cancellationToken = default) {
-        lock (_sync) {
-            ThrowIfDisposed();
-            _automaticAuthentication = false;
-            _authenticationVersion++;
-        }
-
         return ChangeAuthenticationAsync(null, cancellationToken);
     }
 
@@ -372,6 +367,15 @@ public sealed partial class DarkWsClient : IDarkWsClient {
         if (Interlocked.Increment(ref _pendingCount) > _options.MaxPendingRequests) {
             Interlocked.Decrement(ref _pendingCount);
             throw new DarkWsClientLimitException("The pending request limit was reached.");
+        }
+
+        // Logout starts only once it holds a pending slot, so a call rejected by the limit keeps the token provider.
+        // This still runs synchronously at the call, before any await, so call order decides the version.
+        if (token is null) {
+            lock (_sync) {
+                _automaticAuthentication = false;
+                _authenticationVersion++;
+            }
         }
 
         var entered = false;

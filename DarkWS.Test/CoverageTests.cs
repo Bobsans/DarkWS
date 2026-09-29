@@ -54,15 +54,15 @@ public sealed class CoverageTests {
     [Test]
     public async Task InMemoryBackplaneStopsDeliveringAfterUnsubscribeAsync() {
         var backplane = new InMemoryDarkWsBackplane();
-        var received = new List<DarkWsBroadcast>();
-        await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "before", null));
+        var received = new List<BroadcastMessage>();
+        await backplane.PublishAsync(new BroadcastMessage(BroadcastTargetType.All, null, "before", null));
         await backplane.SubscribeAsync((message, _) => {
             received.Add(message);
             return ValueTask.CompletedTask;
         });
-        await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "during", null));
+        await backplane.PublishAsync(new BroadcastMessage(BroadcastTargetType.All, null, "during", null));
         await backplane.UnsubscribeAsync();
-        await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "after", null));
+        await backplane.PublishAsync(new BroadcastMessage(BroadcastTargetType.All, null, "after", null));
 
         Assert.That(received.Select(it => it.Action), Is.EqualTo(new[] { "during" }));
     }

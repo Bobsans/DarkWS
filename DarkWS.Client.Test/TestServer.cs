@@ -126,7 +126,7 @@ public sealed class EchoHandler : HandlerBase {
 
     [Action("notify")]
     public async Task<IResponse> NotifyAsync() {
-        await BroadcastToSelfAsync("changed", new { Value = 11 });
+        await PublishAsync(Self, "changed", new { Value = 11 });
         return Ok();
     }
 }

@@ -3,10 +3,10 @@ using DarkWS.Abstractions;
 namespace DarkWS;
 
 internal sealed class InMemoryDarkWsBackplane : IDarkWsBackplane {
-    private Func<DarkWsBroadcast, CancellationToken, ValueTask>? _listener;
+    private Func<BroadcastMessage, CancellationToken, ValueTask>? _listener;
 
     public ValueTask PublishAsync(
-        DarkWsBroadcast message,
+        BroadcastMessage message,
         CancellationToken cancellationToken = default
     ) {
         if (cancellationToken.IsCancellationRequested) {
@@ -19,7 +19,7 @@ internal sealed class InMemoryDarkWsBackplane : IDarkWsBackplane {
     }
 
     public ValueTask SubscribeAsync(
-        Func<DarkWsBroadcast, CancellationToken, ValueTask> listener,
+        Func<BroadcastMessage, CancellationToken, ValueTask> listener,
         CancellationToken cancellationToken = default
     ) {
         ArgumentNullException.ThrowIfNull(listener);

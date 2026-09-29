@@ -1,4 +1,6 @@
-<img src="assets/icon.svg" alt="DarkWS" width="128" align="right">
+<div align="center">
+
+<img src="assets/icon.svg" alt="DarkWS logo" width="128">
 
 # DarkWS
 
@@ -9,6 +11,8 @@
 [![NuGet Redis](https://img.shields.io/nuget/v/DarkWS.Redis.svg?label=NuGet%20Redis)](https://www.nuget.org/packages/DarkWS.Redis)
 [![npm](https://img.shields.io/npm/v/darkws.svg?label=npm)](https://www.npmjs.com/package/darkws)
 [![License](https://img.shields.io/github/license/Bobsans/DarkWS)](LICENSE)
+
+</div>
 
 DarkWS is a small request/response protocol over WebSockets for ASP.NET Core
 and browsers. It provides typed handlers, per-message dependency injection
@@ -100,7 +104,10 @@ site can open a socket that carries the user's cookie and becomes a DarkWS sessi
 (cross-site WebSocket hijacking). `WebSocketOptions.AllowedOrigins` rejects
 upgrades from other origins with 403 before DarkWS authenticates them; requests
 without an `Origin` header (non-browser clients) are still accepted. An empty list,
-the `UseWebSockets()` default, allows every origin.
+the `UseWebSockets()` default, allows every origin. When other WebSocket endpoints
+need different origins, set `DarkWsOptions.AllowedOrigins` instead: the DarkWS
+endpoint then rejects other origins with 403 before running the authenticator,
+under the same rules.
 
 DarkWS action authorization supports only this authenticated/anonymous distinction.
 `[Authorize]`, role/policy attributes, and other `IAuthorizeData` on a handler or
@@ -130,10 +137,7 @@ call throws `InvalidOperationException` before changing any registrations, even
 when the authenticator and session types are the same.
 
 The canonical static entry points are `DarkWsServiceCollectionExtensions` and
-`DarkWsEndpointRouteBuilderExtensions` (Redis uses
-`DarkWsRedisServiceCollectionExtensions`). The old `Configuration` and
-`RedisConfiguration` static calls remain available as obsolete forwarding
-wrappers until the next major release. Extension-call syntax is unchanged.
+`DarkWsEndpointRouteBuilderExtensions` (Redis adds `DarkWsRedisBuilderExtensions`).
 
 Actions must be public instance methods declared on the scanned handler class,
 return exactly `IResponse` or `Task<IResponse>`, and accept zero or one payload
@@ -229,8 +233,8 @@ public sealed class MessageHandler(MessageService messages)
     [Action("send")]
     public async Task<IResponse> SendAsync(MessageInput input) {
         var result = await messages.SendAsync(Session.UserId, input);
-        await BroadcastToGroupAsync(
-            $"account:{Session.AccountId}",
+        await PublishAsync(
+            BroadcastTarget.Group($"account:{Session.AccountId}"),
             "message:created",
             result
         );
@@ -242,13 +246,13 @@ public sealed class MessageHandler(MessageService messages)
 Scoped services can inject `IDarkWsContextAccessor` to access the current
 DarkWS session, `HttpContext`, connection, and cancellation token.
 This works only in the initialized message scope. Access from ordinary HTTP or
-connection scopes throws `InvalidOperationException`; lifecycle middleware must
-use the context passed to its hook. The session there is the one the action was
+connection scopes throws `InvalidOperationException`; lifecycle hooks must
+use the context passed to them. The session there is the one the action was
 authorized with: an `auth:` or `logout` arriving while the action runs does not
 change it (`IWebSocketConnection.Session` stays live).
 
 Each `auth:` command resolves `IDarkWsAuthenticator` from its own scope. Lifecycle
-middleware and the authenticator of the upgrade request live in that request's
+hooks and the authenticator of the upgrade request live in that request's
 scope for the whole connection; resolve short-lived dependencies such as a
 `DbContext` through `IServiceScopeFactory` inside them. A nullable action parameter permits missing
 or null payloads. By default, non-nullable parameters require a payload. Set
@@ -286,39 +290,55 @@ storage immediately and cancels handler tokens. The socket is aborted when close
 cannot finish in time. Handlers must observe `ConnectionAborted`: .NET cannot
 forcibly stop arbitrary application code. If a handler ignores cancellation,
 its scope and connection resources are retained until it finishes; no response
-is sent afterward. Disposal coordinates with concurrent socket operations.
+is sent afterward. The upgrade `HttpContext` is not retained: once shutdown
+completes, `HttpContext`, `AspNetSession`, and `IWebSocketConnection.HttpContext`
+throw `ObjectDisposedException`, because ASP.NET Core recycles the context of a
+finished request. Copy request values such as `Items` or headers before work that
+does not observe `ConnectionAborted`; `Session` and its `User` stay readable.
+Disposal coordinates with concurrent socket operations.
 In `OnCloseAsync`, `ConnectionAborted` is that shutdown deadline rather than the
 already cancelled handler token, so asynchronous cleanup can run until it expires.
 
-Session/group broadcasts use indexes. Session groups are snapshotted when a
-connection is added or re-authenticated. If an application changes group membership
-on its own, call `ConnectionStorage.Add(connection)` to refresh the indexes.
-`Add` ignores a closed connection, so a refresh that races with disconnect cannot
-register it again.
-
-For several groups, publish once with `BroadcastToGroupsAsync`; overlapping members
-receive one notification. Use a named `except` argument to distinguish exclusions
-from the generic data argument:
+Connection lifecycle hooks derive from `DarkWsConnectionHooks` and are registered
+explicitly; assembly scanning registers only handlers:
 
 ```csharp
-await broadcaster.BroadcastToGroupsAsync(
-    ["account:42", "editors"], "document:changed", new { DocumentId = 7 },
-    except: new DarkWsBroadcastExclusion { ConnectionId = sourceConnectionId });
-await broadcaster.BroadcastToGroupAsync(
-    "account:42", "document:changed",
-    except: new DarkWsBroadcastExclusion { SessionId = sourceSessionId });
+builder.Services.AddDarkWs()
+    .AddHandlersFromAssemblyContaining<Program>()
+    .AddConnectionHooks<PresenceHooks>();
 ```
 
-`ConnectionId` skips one tab/connection; `SessionId` skips every connection in that
-session. When both are provided, either match is excluded. The same helpers exist
+Session/group broadcasts use indexes. Session groups are snapshotted when a
+connection is added or re-authenticated. If an application changes group membership
+on its own, call `Refresh(connection)` on the injected `IDarkWsConnections` to
+refresh the indexes. It returns false for a closed or unregistered connection, so a
+refresh that races with disconnect cannot register it again. `IDarkWsConnections`
+also looks up local connections by id, session, or group.
+
+`PublishAsync` takes a `BroadcastTarget` that selects the recipients. For
+several groups, publish once with `BroadcastTarget.Groups`; a connection in
+several of them receives one notification. Group targets can skip recipients:
+
+```csharp
+await broadcaster.PublishAsync(
+    BroadcastTarget.Groups(["account:42", "editors"]).ExceptConnection(sourceConnectionId),
+    "document:changed", new { DocumentId = 7 });
+await broadcaster.PublishAsync(
+    BroadcastTarget.Group("account:42").ExceptSession(sourceSessionId),
+    "document:changed");
+```
+
+`ExceptConnection` skips one tab/connection; `ExceptSession` skips every connection
+in that session. When both are set, either match is excluded. `All`, `Connection`,
+and `Session` targets do not take exclusions. The same `PublishAsync` helpers exist
 on `HandlerBase`; use `Connection.Id` to exclude the calling connection.
-Selection uses one snapshot of indexed group/session membership. Duplicate groups
-are collapsed, unknown groups have no recipients, and an empty group sequence does
-not publish. Null collections and blank group names or exclusion ids are rejected.
-New group-union methods on custom `IBroadcaster` implementations must be implemented;
-their defaults throw `NotSupportedException` rather than silently ignoring exclusions.
-Use `cancellationToken: default` (or a typed token) instead of an untyped positional
-`default` when selecting the existing single-group overloads.
+Selection uses one snapshot of indexed group/session membership. `Groups` reads its
+sequence once, collapses duplicates, and an empty sequence does not publish; unknown
+groups have no recipients. Null collections and blank ids or group names are rejected.
+`All`, `Connection`, `Session`, and `Group` targets without exclusions keep the
+existing single-target envelope. Custom `IBroadcaster` implementations implement the
+two `PublishAsync` overloads that take a cancellation token; the token-less ones
+forward to them. In handlers, `Self` targets the calling connection.
 
 For ASP.NET session state, register `AddSession()` and place `UseSession()`
 before `MapDarkWs()`. WebSockets are long-lived requests, so call
@@ -342,11 +362,11 @@ using DarkWS.Redis;
 using StackExchange.Redis;
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(redis);
-builder.Services.AddDarkWsRedis("my-app:production");
+builder.Services.AddDarkWs().AddRedis("my-app:production");
 ```
 
 Use a unique channel per application and environment. Handler code does not
-change when the backplane changes. Call `AddDarkWsRedis` once per service
+change when the backplane changes. Call `AddRedis` once per service
 collection; a second call throws `InvalidOperationException` rather than
 silently replacing the channel.
 
@@ -533,7 +553,7 @@ allows the next use to reconnect, as documented for the facade.
 
 Request arguments are sent in `data`; broadcasts carry `action` at the top level.
 The browser client's `message` event receives the full broadcast envelope.
-`data` is omitted only by the overloads without data (`Ok()`, `BroadcastAsync(action)`);
+`data` is omitted only by the overloads without data (`Ok()`, `PublishAsync(target, action)`);
 the data overloads always write it, as `null` when the value is null, whatever the
 application's `JsonOptions.DefaultIgnoreCondition`.
 This schema is incompatible with the previous request `payload`, nested broadcasts,
@@ -575,10 +595,7 @@ Session retention does not validate or extend the previous session's lifetime;
 the application must still enforce expiry and revocation.
 JSON actions `darkws:authenticate` / `darkws:logout` are no longer system commands, and
 `@auth` replies are no longer emitted. `@auth` remains a reserved legacy request id.
-The obsolete `AuthenticationFailedError` option is unused and no longer validated;
-empty values do not prevent startup. Remove it from configuration and code: text
-authentication always replies `auth:failed`, and the option will be removed in the
-next major version.
+Text authentication always replies `auth:failed`.
 
 Clients serialize authentication and logout because text replies have no correlation
 id. A timeout (or cancellation while waiting in .NET) discards the socket so a late

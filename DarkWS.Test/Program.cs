@@ -20,7 +20,8 @@ public static class Setup {
                 var darkWs = services.AddDarkWs()
                     .AddHandlersFromAssemblyContaining<TestHandler>()
                     .AddAuthenticator<TestAuthenticator, TestSession>()
-                    .AddScopeInitializer<TestScopeInitializer>();
+                    .AddScopeInitializer<TestScopeInitializer>()
+                    .AddConnectionHooks<TestConnectionHooks>();
                 configureDarkWs?.Invoke(services, darkWs);
             })
             .Configure(app => {

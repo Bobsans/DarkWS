@@ -18,25 +18,25 @@ public sealed class DarkWsBuilder {
     /// <summary>Gets the service collection being configured.</summary>
     public IServiceCollection Services { get; }
 
-    /// <summary>Scans the marker type's assembly for concrete handlers and middleware; invalid or duplicate actions fail registration.</summary>
+    /// <summary>Scans the marker type's assembly for concrete handlers; invalid or duplicate actions fail registration.</summary>
     public DarkWsBuilder AddHandlersFromAssemblyContaining<T>() {
         return AddHandlersFromAssembly(typeof(T).Assembly);
     }
 
-    /// <summary>Scans concrete handlers and middleware; only actions declared on the concrete handler are registered.</summary>
+    /// <summary>Scans concrete handlers; only actions declared on the concrete handler are registered.</summary>
     public DarkWsBuilder AddHandlersFromAssembly(Assembly assembly) {
         ArgumentNullException.ThrowIfNull(assembly);
-        foreach (var type in GetLoadableTypes(assembly).Where(it => !it.IsAbstract)) {
-            if (type.IsSubclassOf(typeof(HandlerBase))) {
-                Services.AddScoped(type);
-                _registry.Add(type);
-            }
-
-            if (type.IsSubclassOf(typeof(DarkWsMiddleware))) {
-                Services.TryAddEnumerable(ServiceDescriptor.Scoped(typeof(DarkWsMiddleware), type));
-            }
+        foreach (var type in GetLoadableTypes(assembly).Where(it => !it.IsAbstract && it.IsSubclassOf(typeof(HandlerBase)))) {
+            Services.AddScoped(type);
+            _registry.Add(type);
         }
 
+        return this;
+    }
+
+    /// <summary>Registers scoped connection lifecycle hooks. Hooks run in registration order; registering the same type again has no effect.</summary>
+    public DarkWsBuilder AddConnectionHooks<THooks>() where THooks : DarkWsConnectionHooks {
+        Services.TryAddEnumerable(ServiceDescriptor.Scoped<DarkWsConnectionHooks, THooks>());
         return this;
     }
 
@@ -65,6 +65,12 @@ public sealed class DarkWsBuilder {
     /// <summary>Registers a scoped action filter. Filters run in registration order around bound actions.</summary>
     public DarkWsBuilder AddActionFilter<TFilter>() where TFilter : class, IDarkWsActionFilter {
         Services.AddScoped<IDarkWsActionFilter, TFilter>();
+        return this;
+    }
+
+    /// <summary>Registers a scoped request filter. Filters run in registration order around every well-formed request, including rejected ones.</summary>
+    public DarkWsBuilder AddRequestFilter<TFilter>() where TFilter : class, IDarkWsRequestFilter {
+        Services.AddScoped<IDarkWsRequestFilter, TFilter>();
         return this;
     }
 

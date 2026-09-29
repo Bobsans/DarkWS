@@ -42,94 +42,27 @@ public abstract class HandlerBase {
     /// <summary>Creates an error action result with a stable code and optional details.</summary>
     protected static IResponse Error<T>(string error, T details) => new ErrorResponse<T>(error, details);
 
-    /// <summary>Publishes an action and optional data to all connections through the backplane.</summary>
-    protected Task BroadcastAsync(string action, CancellationToken cancellationToken = default) {
-        return Context.Broadcaster.BroadcastAsync(action, cancellationToken);
+    /// <summary>Gets a target selecting only the current handler connection.</summary>
+    protected BroadcastTarget Self => BroadcastTarget.Connection(Connection.Id);
+
+    /// <summary>Publishes an action without data to the selected recipients; use ExceptConnection(Connection.Id) to skip this handler's connection.</summary>
+    protected Task PublishAsync(BroadcastTarget target, string action) {
+        return Context.Broadcaster.PublishAsync(target, action, CancellationToken.None);
     }
 
-    /// <summary>Publishes an action and optional data to all connections through the backplane.</summary>
-    protected Task BroadcastAsync<T>(string action, T? data, CancellationToken cancellationToken = default) {
-        return Context.Broadcaster.BroadcastAsync(action, data, cancellationToken);
+    /// <summary>Publishes an action without data to the selected recipients; use ExceptConnection(Connection.Id) to skip this handler's connection.</summary>
+    protected Task PublishAsync(BroadcastTarget target, string action, CancellationToken cancellationToken) {
+        return Context.Broadcaster.PublishAsync(target, action, cancellationToken);
     }
 
-    /// <summary>Publishes an action and optional data to the current handler connection.</summary>
-    protected Task BroadcastToSelfAsync(string action, CancellationToken cancellationToken = default) {
-        return Context.Broadcaster.BroadcastToConnectionAsync(Connection.Id, action, cancellationToken);
+    /// <summary>Publishes an action and data, including explicit null, to the selected recipients.</summary>
+    protected Task PublishAsync<T>(BroadcastTarget target, string action, T? data) {
+        return Context.Broadcaster.PublishAsync(target, action, data, CancellationToken.None);
     }
 
-    /// <summary>Publishes an action and optional data to the current handler connection.</summary>
-    protected Task BroadcastToSelfAsync<T>(string action, T? data, CancellationToken cancellationToken = default) {
-        return Context.Broadcaster.BroadcastToConnectionAsync(Connection.Id, action, data, cancellationToken);
-    }
-
-    /// <summary>Publishes an action and optional data to connections in the specified session.</summary>
-    protected Task BroadcastToSessionAsync(string sessionId, string action, CancellationToken cancellationToken = default) {
-        return Context.Broadcaster.BroadcastToSessionAsync(sessionId, action, cancellationToken);
-    }
-
-    /// <summary>Publishes an action and optional data to connections in the specified session.</summary>
-    protected Task BroadcastToSessionAsync<T>(string sessionId, string action, T? data, CancellationToken cancellationToken = default) {
-        return Context.Broadcaster.BroadcastToSessionAsync(sessionId, action, data, cancellationToken);
-    }
-
-    /// <summary>Publishes an action and optional data to members of the specified group.</summary>
-    protected Task BroadcastToGroupAsync(string group, string action, CancellationToken cancellationToken = default) {
-        return Context.Broadcaster.BroadcastToGroupAsync(group, action, cancellationToken);
-    }
-
-    /// <summary>Publishes an action and optional data to members of the specified group.</summary>
-    protected Task BroadcastToGroupAsync<T>(string group, string action, T? data, CancellationToken cancellationToken = default) {
-        return Context.Broadcaster.BroadcastToGroupAsync(group, action, data, cancellationToken);
-    }
-
-    /// <summary>Publishes to one group with exclusions; use Connection.Id to exclude this handler's connection.</summary>
-    protected Task BroadcastToGroupAsync(string group, string action, DarkWsBroadcastExclusion except) {
-        return BroadcastToGroupAsync(group, action, except, CancellationToken.None);
-    }
-
-    /// <summary>Publishes to one group with exclusions; use Connection.Id to exclude this handler's connection.</summary>
-    protected Task BroadcastToGroupAsync(string group, string action, DarkWsBroadcastExclusion except, CancellationToken cancellationToken) {
-        return Context.Broadcaster.BroadcastToGroupAsync(group, action, except, cancellationToken);
-    }
-
-    /// <summary>Publishes data to one group with explicit connection/session exclusions.</summary>
-    protected Task BroadcastToGroupAsync<T>(string group, string action, T? data, DarkWsBroadcastExclusion except) {
-        return BroadcastToGroupAsync(group, action, data, except, CancellationToken.None);
-    }
-
-    /// <summary>Publishes data to one group with explicit connection/session exclusions.</summary>
-    protected Task BroadcastToGroupAsync<T>(string group, string action, T? data, DarkWsBroadcastExclusion except, CancellationToken cancellationToken) {
-        return Context.Broadcaster.BroadcastToGroupAsync(group, action, data, except, cancellationToken);
-    }
-
-    /// <summary>Publishes once to a group union with no duplicate recipients.</summary>
-    protected Task BroadcastToGroupsAsync(IEnumerable<string> groups, string action) {
-        return BroadcastToGroupsAsync(groups, action, null, CancellationToken.None);
-    }
-
-    /// <summary>Publishes once to a group union, with optional exclusions and no duplicate recipients.</summary>
-    protected Task BroadcastToGroupsAsync(IEnumerable<string> groups, string action, DarkWsBroadcastExclusion? except) {
-        return BroadcastToGroupsAsync(groups, action, except, CancellationToken.None);
-    }
-
-    /// <summary>Publishes once to a group union, with optional exclusions and no duplicate recipients.</summary>
-    protected Task BroadcastToGroupsAsync(IEnumerable<string> groups, string action, DarkWsBroadcastExclusion? except, CancellationToken cancellationToken) {
-        return Context.Broadcaster.BroadcastToGroupsAsync(groups, action, except, cancellationToken);
-    }
-
-    /// <summary>Publishes data once to a group union with no duplicate recipients.</summary>
-    protected Task BroadcastToGroupsAsync<T>(IEnumerable<string> groups, string action, T? data) {
-        return BroadcastToGroupsAsync(groups, action, data, null, CancellationToken.None);
-    }
-
-    /// <summary>Publishes data once to a group union, with optional exclusions and no duplicate recipients.</summary>
-    protected Task BroadcastToGroupsAsync<T>(IEnumerable<string> groups, string action, T? data, DarkWsBroadcastExclusion? except) {
-        return BroadcastToGroupsAsync(groups, action, data, except, CancellationToken.None);
-    }
-
-    /// <summary>Publishes data once to a group union, with optional exclusions and no duplicate recipients.</summary>
-    protected Task BroadcastToGroupsAsync<T>(IEnumerable<string> groups, string action, T? data, DarkWsBroadcastExclusion? except, CancellationToken cancellationToken) {
-        return Context.Broadcaster.BroadcastToGroupsAsync(groups, action, data, except, cancellationToken);
+    /// <summary>Publishes an action and data, including explicit null, to the selected recipients.</summary>
+    protected Task PublishAsync<T>(BroadcastTarget target, string action, T? data, CancellationToken cancellationToken) {
+        return Context.Broadcaster.PublishAsync(target, action, data, cancellationToken);
     }
 }
 

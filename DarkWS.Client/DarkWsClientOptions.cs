@@ -35,7 +35,7 @@ public sealed class DarkWsClientOptions {
     /// <summary>Maximum application requests, including connection waits. Default: 256.</summary>
     public int MaxPendingRequests { get; set; } = 256;
 
-    /// <summary>Maximum queued broadcasts. Default: 256.</summary>
+    /// <summary>Maximum queued broadcasts, and maximum Error events waiting for slow handlers; further errors are dropped. Default: 256.</summary>
     public int NotificationQueueCapacity { get; set; } = 256;
 
     /// <summary>Payload and result serializer options. The client takes a copy. Default: Web defaults.</summary>

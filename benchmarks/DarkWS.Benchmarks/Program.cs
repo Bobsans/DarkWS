@@ -14,8 +14,8 @@ var samples = quick ? 3 : 5;
 var iterations = quick ? 1 : 20;
 var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 var payload = JsonSerializer.SerializeToElement(new { Text = new string('x', 256), Values = Enumerable.Range(0, 16).ToArray() });
-var envelope = new BroadcastActionMessage<JsonElement>("changed", payload);
-var inputBytes = JsonSerializer.SerializeToUtf8Bytes(new InputMessage("request", "example:echo", payload), json);
+var envelope = new WireEnvelope(DarkWsProtocol.BroadcastId, "changed", payload);
+var inputBytes = JsonSerializer.SerializeToUtf8Bytes(new WireEnvelope("request", "example:echo", payload), json);
 long consumed = 0;
 
 Console.WriteLine($"# {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}; samples={samples}; iterations={iterations}; payload_bytes={inputBytes.Length}");
@@ -47,7 +47,7 @@ foreach (var count in quick ? new[] { 100 } : new[] { 100, 1000, 10000 }) {
     }
 
     var broadcaster = host.Services.GetRequiredService<IBroadcaster>();
-    await MeasureAsync("in-memory-fanout", count, () => broadcaster.BroadcastAsync("changed", payload));
+    await MeasureAsync("in-memory-fanout", count, () => broadcaster.PublishAsync(BroadcastTarget.All, "changed", payload));
     if (connections.Any(connection => connection.Sends != 2 + samples * iterations)) {
         throw new InvalidOperationException("Incomplete fanout");
     }
@@ -62,7 +62,7 @@ foreach (var count in quick ? new[] { 100 } : new[] { 100, 1000, 10000 }) {
 
 await MeasureAsync("parse-1000-requests", 1, () => {
     for (var index = 0; index < 1000; index++) {
-        var message = JsonSerializer.Deserialize<InputMessage>(inputBytes, json) ?? throw new InvalidOperationException("Missing request");
+        var message = JsonSerializer.Deserialize<WireEnvelope>(inputBytes, json) ?? throw new InvalidOperationException("Missing request");
         consumed += message.Id.Length + message.Action.Length;
     }
 
@@ -94,16 +94,18 @@ async Task MeasureAsync(string scenario, int recipients, Func<Task> operation) {
     Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{scenario},{recipients},{times[samples / 2]:F4},{allocations[samples / 2]:F0}"));
 }
 
+// Same shape as the internal request and broadcast envelopes: {"id","action","data"}.
+sealed record WireEnvelope(string Id, string Action, JsonElement? Data);
+
 sealed class SinkConnection : IWebSocketConnection {
     private int _sends;
     public int Sends => Volatile.Read(ref _sends);
     public string Id { get; } = Guid.NewGuid().ToString("N");
-    public WebSocket WebSocket => throw new NotSupportedException("Benchmark uses an in-memory sink");
     public HttpContext HttpContext { get; } = new DefaultHttpContext();
     public IDarkWsSession? Session => null;
     public bool IsOpen => true;
 
-    public Task SendAsync(byte[] data, CancellationToken cancellationToken = default) {
+    public Task SendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) {
         cancellationToken.ThrowIfCancellationRequested();
         if (data.Length == 0) {
             throw new InvalidOperationException("Empty broadcast");
@@ -113,7 +115,7 @@ sealed class SinkConnection : IWebSocketConnection {
         return Task.CompletedTask;
     }
 
-    public Task<ReceivedMessage> ReceiveMessageAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public Task CloseAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public void Abort() { }
     public void Dispose() { }
 }

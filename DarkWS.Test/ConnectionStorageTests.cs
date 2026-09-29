@@ -119,9 +119,56 @@ public sealed class ConnectionStorageTests {
         Assert.That(storage.GetByGroup("new-group"), Is.EqualTo(new[] { connection }));
     }
 
+    [Test]
+    public void ReplacementByIdReindexesAndRefreshIgnoresUnregisteredConnections() {
+        var storage = new ConnectionStorage();
+        using var first = new FakeConnection("same", new Session("first", () => ["old", "old"]));
+        storage.Add(first);
+        first.Session = new Session("second", () => ["new"]);
+        Assert.That(storage.Refresh(first), Is.True);
+        Assert.That(storage.GetBySession("first"), Is.Empty);
+        Assert.That(storage.GetByGroup("old"), Is.Empty);
+        Assert.That(storage.GetBySession("second"), Is.EqualTo(new[] { first }));
+        using var replacement = new FakeConnection("same", null);
+        storage.Add(replacement);
+        Assert.That(storage.Refresh(first), Is.False);
+        Assert.That(storage.Remove(first), Is.False);
+        Assert.That(storage.GetByGroup("new"), Is.Empty);
+        Assert.That(storage.Find("same"), Is.SameAs(replacement));
+        Assert.That(storage.Remove(replacement), Is.True);
+        Assert.That(storage.GetAll(), Is.Empty);
+        Assert.That(storage.Find("same"), Is.Null);
+    }
+
+    [Test]
+    public void ConcurrentRegistrationAndRemovalKeepIndexesConsistent() {
+        var storage = new ConnectionStorage();
+        Parallel.For(0, 1000, index => {
+            using var connection = new FakeConnection(index.ToString(), new Session("shared", () => ["group"]));
+            storage.Add(connection);
+            Assert.That(storage.GetBySession("shared"), Does.Contain(connection));
+            Assert.That(storage.GetByGroup("group"), Does.Contain(connection));
+            storage.Remove(connection);
+        });
+        Assert.That(storage.GetAll(), Is.Empty);
+        Assert.That(storage.GetBySession("shared"), Is.Empty);
+        Assert.That(storage.GetByGroup("group"), Is.Empty);
+    }
+
     private sealed class Session(string id, Func<IReadOnlyCollection<string>> groups) : IDarkWsSession {
         public string Id => id;
         public ClaimsPrincipal User { get; } = new(new ClaimsIdentity());
         public IReadOnlyCollection<string> Groups => groups();
+    }
+
+    private sealed class FakeConnection(string id, IDarkWsSession? session) : IWebSocketConnection {
+        public string Id => id;
+        public HttpContext HttpContext { get; } = new DefaultHttpContext();
+        public IDarkWsSession? Session { get; set; } = session;
+        public bool IsOpen { get; private set; } = true;
+        public Task SendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task CloseAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public void Abort() => IsOpen = false;
+        public void Dispose() => IsOpen = false;
     }
 }

@@ -251,7 +251,15 @@ public sealed partial class DarkWsClient {
             return;
         }
 
+        // Failing subscribers can outpace a slow Error handler; beyond the notification capacity new errors are
+        // dropped instead of growing the event queue. StateChanged events are never dropped.
+        if (Interlocked.Increment(ref _queuedErrors) > _options.NotificationQueueCapacity) {
+            Interlocked.Decrement(ref _queuedErrors);
+            return;
+        }
+
         QueueEvent(() => {
+            Interlocked.Decrement(ref _queuedErrors);
             foreach (var @delegate in handlers.GetInvocationList()) {
                 var handler = (EventHandler<DarkWsClientErrorEventArgs>)@delegate;
                 try {
