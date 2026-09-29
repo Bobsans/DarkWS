@@ -1,4 +1,6 @@
 #nullable enable
+DarkWS.DarkWsOptions.RunActionsOnThreadPool.get -> bool
+DarkWS.DarkWsOptions.RunActionsOnThreadPool.set -> void
 DarkWS.DarkWsOptions.AllowNullPayloads.get -> bool
 DarkWS.DarkWsOptions.AllowNullPayloads.set -> void
 DarkWS.DarkWsOptions.AcceptAnonymousOnUpgradeAuthenticationException.get -> bool

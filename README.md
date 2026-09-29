@@ -164,6 +164,14 @@ Responses may arrive out of order; correlate them by `id`. The host application 
 must enforce a total concurrent connection limit and any per-user/IP limits;
 DarkWS only bounds requests within each connection.
 
+`RunActionsOnThreadPool` defaults to `false`. Set it to `true` to run action
+processing on the thread pool, so a synchronous handler (or the part before its
+first `await`) does not block dispatching the next request or `auth:`/`logout`.
+Scheduled actions still count toward `MaxConcurrentRequestsPerConnection`; queue
+backpressure and command ordering remain in effect. Each action captures its
+DarkWS session before scheduling. Handler execution and responses may occur out
+of order; shared `HttpContext` and `ISession` still require synchronization.
+
 On .NET 9/10, transport PING/PONG detects unresponsive peers using
 `KeepAliveInterval` and `KeepAliveTimeout`. On .NET 8, `ReceiveIdleTimeout` bounds
 each pending socket read, resetting after every received fragment; a timeout

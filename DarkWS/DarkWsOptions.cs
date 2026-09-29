@@ -19,6 +19,9 @@ public sealed class DarkWsOptions {
     /// <summary>Maximum in-flight requests per connection. Default 16; as many more wait in order while reading continues.</summary>
     public int MaxConcurrentRequestsPerConnection { get; set; } = 16;
 
+    /// <summary>Runs action processing on the thread pool so synchronous handlers do not block dispatch. Default false; the per-connection request limit still applies.</summary>
+    public bool RunActionsOnThreadPool { get; set; }
+
     /// <summary>Longest time a request waits for a free place in a full connection queue before BusyError. Default 5 seconds; must be a positive timer duration.</summary>
     public TimeSpan RequestQueueTimeout { get; set; } = TimeSpan.FromSeconds(5);
 

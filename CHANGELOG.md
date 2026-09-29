@@ -8,6 +8,10 @@ include migration guidance before a release is published.
 
 ### Added
 
+- `DarkWsOptions.RunActionsOnThreadPool` (default false) moves action processing
+  to the thread pool so synchronous handlers do not stall the dispatcher.
+  Scheduled actions retain the per-connection concurrency limit and capture their
+  DarkWS session before scheduling; queue backpressure is unchanged.
 - `DarkWsOptions.AllowNullPayloads` (default false) permits omitted/null data for
   reference action parameters regardless of their nullable annotations. Both sync
   and async handlers receive null directly. Non-nullable value types and malformed

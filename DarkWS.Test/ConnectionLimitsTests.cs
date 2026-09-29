@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using DarkWS.Abstractions;
@@ -18,14 +19,21 @@ using NUnit.Framework;
 namespace DarkWS.Test;
 
 public sealed class ConnectionLimitsTests {
-    [TestCase(1, false)]
-    [TestCase(4, false)]
-    [TestCase(16, false)]
-    [TestCase(1, true)]
-    public async Task RequestsAreBoundedPerConnectionAndWaitingCanBeCancelled(int limit, bool cancel) {
+    [TestCase(1, false, false)]
+    [TestCase(4, false, false)]
+    [TestCase(16, false, false)]
+    [TestCase(1, true, false)]
+    [TestCase(1, false, true)]
+    [TestCase(4, false, true)]
+    [TestCase(16, false, true)]
+    [TestCase(1, true, true)]
+    public async Task RequestsAreBoundedPerConnectionAndWaitingCanBeCancelled(int limit, bool cancel, bool runOnThreadPool) {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddDarkWs(options => options.MaxConcurrentRequestsPerConnection = limit);
+        services.AddDarkWs(options => {
+            options.MaxConcurrentRequestsPerConnection = limit;
+            options.RunActionsOnThreadPool = runOnThreadPool;
+        });
         services.AddSingleton<RequestProbe>();
         services.AddScoped<SlowHandler>();
         await using var provider = services.BuildServiceProvider();
@@ -74,6 +82,47 @@ public sealed class ConnectionLimitsTests {
                 var ids = socket.Sent.Select(bytes => JsonSerializer.Deserialize<ResponseMessageNoData>(bytes, Utils.JsonOptions)!.Id);
                 Assert.That(ids, Is.EquivalentTo(Enumerable.Range(0, 500).Select(id => id.ToString())));
             }
+        }
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task SynchronousHandlerOnlyBlocksDispatchByDefault(bool runOnThreadPool) {
+        await using var provider = CreateProvider(options => {
+            options.MaxConcurrentRequestsPerConnection = 2;
+            if (runOnThreadPool) {
+                options.RunActionsOnThreadPool = true;
+            }
+        });
+        var probe = provider.GetRequiredService<RequestProbe>();
+        var socket = new TestWebSocket();
+        var session = new TestSession("original", new ClaimsPrincipal(new ClaimsIdentity([], "Test")));
+        var connection = new WebSocketConnection(socket, new DefaultHttpContext { RequestServices = provider }, session);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(connection, cancellation.Token);
+        try {
+            socket.EnqueueReceive("""{"id":"blocked","action":"limits:blocking"}""");
+            await UntilAsync(() => probe.Started == 1);
+            socket.EnqueueReceive("""{"id":"fast","action":"limits:fast"}""");
+            socket.EnqueueReceive("auth:");
+            socket.EnqueueReceive("logout");
+            if (runOnThreadPool) {
+                await UntilAsync(() => socket.Sent.Count == 3);
+                Assert.That(connection.Session, Is.Null);
+            } else {
+                await Task.Delay(100);
+                Assert.That(socket.Sent, Is.Empty);
+            }
+
+            probe.Release.TrySetResult();
+            await UntilAsync(() => socket.Sent.Count == 4);
+            Assert.That(socket.Sent.Select(Encoding.UTF8.GetString), Is.EquivalentTo(new[] {
+                "{\"id\":\"blocked\",\"data\":\"original\"}", "{\"id\":\"fast\"}", "auth:failed", "logout:success"
+            }));
+        } finally {
+            probe.Release.TrySetResult();
+            cancellation.Cancel();
+            await accept.WaitAsync(TimeSpan.FromSeconds(5));
         }
     }
 
@@ -318,6 +367,16 @@ public sealed class ConnectionLimitsTests {
 
     [Handler("limits"), AllowAnonymous]
     public sealed class SlowHandler(RequestProbe probe) : HandlerBase {
+        [Action("blocking")]
+        public IResponse Blocking() {
+            Interlocked.Increment(ref probe.Started);
+            probe.Release.Task.WaitAsync(ConnectionAborted).GetAwaiter().GetResult();
+            return Ok(Session.Id);
+        }
+
+        [Action("fast")]
+        public IResponse Fast() => Ok();
+
         [Action("slow")]
         public async Task<IResponse> Slow() {
             Interlocked.Increment(ref probe.Started);

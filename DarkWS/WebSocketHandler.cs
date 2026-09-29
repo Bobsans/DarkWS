@@ -164,13 +164,22 @@ internal sealed class WebSocketHandler(
         }
     }
 
-    internal async Task ProcessMessageAsync(InputMessage message, IWebSocketConnection connection, CancellationToken cancellationToken) {
+    internal Task ProcessMessageAsync(InputMessage message, IWebSocketConnection connection, CancellationToken cancellationToken) {
+        // Capture before scheduling, so later auth:/logout commands cannot change this action's session.
+        var session = connection.Session;
+        return _options.RunActionsOnThreadPool
+            ? Task.Run(() => ProcessMessageCoreAsync(message, connection, session, cancellationToken))
+            : ProcessMessageCoreAsync(message, connection, session, cancellationToken);
+    }
+
+    private async Task ProcessMessageCoreAsync(InputMessage message, IWebSocketConnection connection, IDarkWsSession? session, CancellationToken cancellationToken) {
         var response = new ResponseContext(connection, message.Id, _options);
         try {
+            cancellationToken.ThrowIfCancellationRequested();
             try {
                 // The result is written inside the message scope, so deferred data can still use scoped services.
                 await using var scope = connection.HttpContext.RequestServices.CreateAsyncScope();
-                var result = await HandleMessageAsync(message, connection, scope.ServiceProvider, cancellationToken);
+                var result = await HandleMessageAsync(message, connection, session, scope.ServiceProvider, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
                 await result.WriteResultAsync(response, cancellationToken);
             } catch (Exception error) when (!response.HasStarted && !cancellationToken.IsCancellationRequested) {
@@ -190,6 +199,7 @@ internal sealed class WebSocketHandler(
     private async Task<IResponse> HandleMessageAsync(
         InputMessage message,
         IWebSocketConnection connection,
+        IDarkWsSession? session,
         IServiceProvider services,
         CancellationToken cancellationToken
     ) {
@@ -198,7 +208,6 @@ internal sealed class WebSocketHandler(
         }
 
         // The action keeps the session it was authorized with, even if auth:/logout arrives meanwhile.
-        var session = connection.Session;
         if (!action.AllowAnonymous && session?.User.Identity?.IsAuthenticated != true) {
             return new ErrorResponse(_options.AuthorizationRequiredError);
         }

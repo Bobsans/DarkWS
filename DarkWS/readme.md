@@ -75,6 +75,13 @@ that finds the queue full for `RequestQueueTimeout` (5 seconds) receives
 pong timeouts. Responses can arrive out of order and use `id` for correlation.
 The host or reverse proxy must enforce total connection and per-user/IP limits.
 
+Set `RunActionsOnThreadPool = true` (default `false`) to prevent synchronous
+handlers, including code before the first `await`, from blocking dispatch of
+later requests and `auth:`/`logout`. Scheduled actions still consume request slots;
+queue backpressure and command ordering are unchanged. Each action captures its
+DarkWS session before scheduling, but handlers may execute out of order.
+Shared `HttpContext` and `ISession` remain unsafe for concurrent mutation.
+
 `KeepAliveInterval` defaults to 30 seconds. On .NET 9/10, `KeepAliveTimeout`
 (30 seconds) enables transport PING/PONG failure detection. On .NET 8,
 `ReceiveIdleTimeout` (2 minutes) aborts a connection when a pending socket read
