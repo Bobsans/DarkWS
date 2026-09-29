@@ -1,3 +1,5 @@
+<img src="assets/icon.svg" alt="DarkWS" width="128" align="right">
+
 # DarkWS
 
 [![CI](https://github.com/Bobsans/DarkWS/actions/workflows/ci.yml/badge.svg)](https://github.com/Bobsans/DarkWS/actions/workflows/ci.yml)
