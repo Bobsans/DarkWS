@@ -10,7 +10,7 @@ insert_final_newline = true
 end_of_line = lf
 
 ; Not change VS generated files!
-[*.{sln,csroj}]
+[*.{sln,csproj}]
 trim_trailing_whitespace = false
 insert_final_newline = false
 dotnet_style_operator_placement_when_wrapping = beginning_of_line
