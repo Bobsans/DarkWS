@@ -35,7 +35,7 @@ public sealed class ClientTests {
         await client.RequestAsync("echo:empty");
         await client.RequestAsync("echo:value", new { value = 1 });
         Assert.That(await client.RequestAsync<string?>("echo:value", null), Is.Null);
-        var error = Assert.ThrowsAsync<DarkWsResponseException>(() => client.RequestAsync("echo:error"))!;
+        var error = (await Assert.ThrowsAsync<DarkWsResponseException>(() => client.RequestAsync("echo:error")))!;
         Assert.Multiple(() => {
             Assert.That(error.Code, Is.EqualTo("test:rejected"));
             Assert.That(error.ErrorData!.Value.GetInt32(), Is.EqualTo(7));
@@ -49,7 +49,7 @@ public sealed class ClientTests {
         await client.AuthenticateAsync("valid");
         Assert.That(await client.RequestAsync<int>("private:value"), Is.EqualTo(123));
         await client.LogoutAsync();
-        Assert.ThrowsAsync<DarkWsResponseException>(() => client.RequestAsync("private:value"));
+        await Assert.ThrowsAsync<DarkWsResponseException>(() => client.RequestAsync("private:value"));
 
         var services = new ServiceCollection();
         services.AddSingleton(server.Endpoint);
@@ -60,7 +60,7 @@ public sealed class ClientTests {
         Assert.That(injected.State, Is.EqualTo(DarkWsClientState.Disconnected));
         Assert.That(await injected.RequestAsync<int>("echo:value", 8), Is.EqualTo(8));
         await client.CloseAsync();
-        Assert.ThrowsAsync<DarkWsConnectionException>(() => client.RequestAsync("echo:empty"));
+        await Assert.ThrowsAsync<DarkWsConnectionException>(() => client.RequestAsync("echo:empty"));
         await client.ConnectAsync();
         await client.RequestAsync("echo:empty");
     }
@@ -116,7 +116,7 @@ public sealed class ClientTests {
         var timed = client.RequestAsync<int>("timeout");
         var socket = await server.AcceptAsync();
         var timedRequest = await TestServer.RequestAsync(socket);
-        Assert.That(Assert.ThrowsAsync<DarkWsTimeoutException>(async () => await timed)!.Stage, Is.EqualTo(DarkWsTimeoutStage.Response));
+        Assert.That((await Assert.ThrowsAsync<DarkWsTimeoutException>(async () => await timed))!.Stage, Is.EqualTo(DarkWsTimeoutStage.Response));
         await TestServer.ReplyAsync(socket, timedRequest);
         await TestServer.SendAsync(socket, "{\"id\":\"@auth\"}");
         await TestServer.SendAsync(socket, "{\"id\":\"unknown\",\"data\":1}");
@@ -124,11 +124,11 @@ public sealed class ClientTests {
             var request = client.RequestAsync<int>("test");
             await TestServer.ReplyAsync(socket, await TestServer.RequestAsync(socket), fields);
             if (fields.Length == 0) {
-                Assert.ThrowsAsync<DarkWsProtocolException>(async () => await request);
+                await Assert.ThrowsAsync<DarkWsProtocolException>(async () => await request);
             } else if (fields.StartsWith("\"data", StringComparison.Ordinal)) {
-                Assert.ThrowsAsync<JsonException>(async () => await request);
+                await Assert.ThrowsAsync<JsonException>(async () => await request);
             } else {
-                Assert.That(Assert.ThrowsAsync<DarkWsResponseException>(async () => await request)!.Code, Is.Empty);
+                Assert.That((await Assert.ThrowsAsync<DarkWsResponseException>(async () => await request))!.Code, Is.Empty);
             }
         }
 
@@ -148,9 +148,9 @@ public sealed class ClientTests {
         var request = client.RequestAsync<int>("slow", cancellation.Token);
         var socket = await server.AcceptAsync();
         var old = await TestServer.RequestAsync(socket);
-        Assert.ThrowsAsync<DarkWsClientLimitException>(() => client.RequestAsync<int>("excess"));
+        await Assert.ThrowsAsync<DarkWsClientLimitException>(() => client.RequestAsync<int>("excess"));
         cancellation.Cancel();
-        Assert.CatchAsync<OperationCanceledException>(async () => await request);
+        await Assert.CatchAsync<OperationCanceledException>(async () => await request);
         await TestServer.ReplyAsync(socket, old);
         var next = client.RequestAsync<int>("next");
         await TestServer.ReplyAsync(socket, await TestServer.RequestAsync(socket));
@@ -166,7 +166,7 @@ public sealed class ClientTests {
         var first = client.ConnectAsync(cancellation.Token);
         var second = client.ConnectAsync();
         cancellation.Cancel();
-        Assert.CatchAsync<OperationCanceledException>(async () => await first);
+        await Assert.CatchAsync<OperationCanceledException>(async () => await first);
         barrier.SetResult(true);
         await second;
         Assert.That(server.Connections, Is.EqualTo(1));
@@ -193,7 +193,7 @@ public sealed class ClientTests {
         var first = await server.AcceptAsync();
         await TestServer.RequestAsync(first);
         await first.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "restart", CancellationToken.None);
-        Assert.ThrowsAsync<DarkWsConnectionException>(async () => await old);
+        await Assert.ThrowsAsync<DarkWsConnectionException>(async () => await old);
         await reconnected.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var next = client.RequestAsync<int>("new");
         var second = await server.AcceptAsync();
@@ -327,7 +327,7 @@ public sealed class ClientTests {
     public async Task UpgradeAuthenticationFailuresStopTheCycle(int status) {
         await using var server = await TestServer.StartAsync(httpStatus: status);
         await using var client = Client(server, options => options.Reconnect = true);
-        Assert.ThrowsAsync<DarkWsConnectionException>(() => client.ConnectAsync());
+        await Assert.ThrowsAsync<DarkWsConnectionException>(() => client.ConnectAsync());
         Assert.That(client.State, Is.EqualTo(DarkWsClientState.Disconnected));
         Assert.That(server.Connections, Is.EqualTo(1));
     }
@@ -348,7 +348,7 @@ public sealed class ClientTests {
         await client.CloseAsync();
         await client.ConnectAsync();
         Assert.That(calls, Is.EqualTo(2));
-        Assert.ThrowsAsync<DarkWsResponseException>(() => client.RequestAsync("private:value"));
+        await Assert.ThrowsAsync<DarkWsResponseException>(() => client.RequestAsync("private:value"));
         await client.AuthenticateAsync("valid");
         await client.CloseAsync();
         await client.ConnectAsync();
@@ -380,7 +380,7 @@ public sealed class ClientTests {
         var rejected = client.AuthenticateAsync("expired");
         Assert.That(await TestServer.ReadAsync(socket), Is.EqualTo("auth:expired"));
         await TestServer.SendAsync(socket, "auth:failed");
-        var error = Assert.ThrowsAsync<DarkWsResponseException>(async () => await rejected)!;
+        var error = (await Assert.ThrowsAsync<DarkWsResponseException>(async () => await rejected))!;
         Assert.That(error.Code, Is.EqualTo("auth:failed"));
         Assert.That(error.RequestId, Is.Empty);
         Assert.That(error.Action, Is.EqualTo("auth"));
@@ -403,9 +403,9 @@ public sealed class ClientTests {
         Assert.That(await TestServer.ReadAsync(socket), Is.EqualTo("auth:valid"));
         if (cancel) {
             cancellation.Cancel();
-            Assert.CatchAsync<OperationCanceledException>(async () => await auth);
+            await Assert.CatchAsync<OperationCanceledException>(async () => await auth);
         } else {
-            Assert.That(Assert.ThrowsAsync<DarkWsTimeoutException>(async () => await auth)!.Stage, Is.EqualTo(DarkWsTimeoutStage.Response));
+            Assert.That((await Assert.ThrowsAsync<DarkWsTimeoutException>(async () => await auth))!.Stage, Is.EqualTo(DarkWsTimeoutStage.Response));
         }
 
         await client.CloseAsync();
@@ -443,7 +443,7 @@ public sealed class ClientTests {
         var connect = client.ConnectAsync();
         var socket = await server.AcceptAsync();
         Assert.That(await TestServer.ReadAsync(socket), Is.EqualTo("auth:valid"));
-        Assert.That(Assert.ThrowsAsync<DarkWsTimeoutException>(async () => await connect)!.Stage, Is.EqualTo(DarkWsTimeoutStage.Connection));
+        Assert.That((await Assert.ThrowsAsync<DarkWsTimeoutException>(async () => await connect))!.Stage, Is.EqualTo(DarkWsTimeoutStage.Connection));
         Assert.That(await failure.Task.WaitAsync(TimeSpan.FromSeconds(5)), Is.TypeOf<DarkWsTimeoutException>());
     }
 
@@ -512,9 +512,9 @@ public sealed class ClientTests {
         var auth = client.AuthenticateAsync("token", cancellation.Token);
         if (cancel) {
             cancellation.Cancel();
-            Assert.CatchAsync<OperationCanceledException>(async () => await auth);
+            await Assert.CatchAsync<OperationCanceledException>(async () => await auth);
         } else {
-            Assert.That(Assert.ThrowsAsync<DarkWsTimeoutException>(async () => await auth)!.Stage, Is.EqualTo(DarkWsTimeoutStage.Send));
+            Assert.That((await Assert.ThrowsAsync<DarkWsTimeoutException>(async () => await auth))!.Stage, Is.EqualTo(DarkWsTimeoutStage.Send));
         }
 
         gate.Release();
@@ -530,7 +530,7 @@ public sealed class ClientTests {
     public async Task ConnectionFailuresKeepASanitizedCause() {
         await using var server = await TestServer.StartAsync(httpStatus: 500);
         await using var client = Client(server, options => options.Endpoint = new Uri(server.Endpoint + "?token=secret-token"));
-        var failure = Assert.ThrowsAsync<DarkWsConnectionException>(() => client.ConnectAsync())!;
+        var failure = (await Assert.ThrowsAsync<DarkWsConnectionException>(() => client.ConnectAsync()))!;
         Assert.That(failure.Message, Does.Contain("WebSocketError."));
         Assert.That(failure.ToString(), Does.Not.Contain("secret-token"));
     }
@@ -542,12 +542,12 @@ public sealed class ClientTests {
             options.ConnectionTimeout = TimeSpan.FromMilliseconds(80);
             options.ConfigureWebSocketOptionsAsync = async (_, token) => await Task.Delay(Timeout.Infinite, token);
         });
-        Assert.That(Assert.ThrowsAsync<DarkWsTimeoutException>(() => client.ConnectAsync())!.Stage, Is.EqualTo(DarkWsTimeoutStage.Connection));
+        Assert.That((await Assert.ThrowsAsync<DarkWsTimeoutException>(() => client.ConnectAsync()))!.Stage, Is.EqualTo(DarkWsTimeoutStage.Connection));
         await client.DisposeAsync();
         Assert.That(client.State, Is.EqualTo(DarkWsClientState.Disposed));
-        Assert.ThrowsAsync<ObjectDisposedException>(() => client.ConnectAsync());
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => client.ConnectAsync());
         Assert.Throws<ObjectDisposedException>(() => client.On("n", () => { }));
-        Assert.ThrowsAsync<ObjectDisposedException>(() => client.CloseAsync());
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => client.CloseAsync());
         client.Dispose();
     }
 
@@ -572,7 +572,7 @@ public sealed class ClientTests {
     }
 
     [Test]
-    public void InvalidSettingsAndArgumentsFailEarly() {
+    public async Task InvalidSettingsAndArgumentsFailEarly() {
         Assert.Throws<ArgumentNullException>(() => new DarkWsClient((DarkWsClientOptions)null!));
         foreach (var uri in new Uri?[] { null, new("relative", UriKind.Relative), new("https://host"), new("ws://user:password@host"), new("ws://host/#fragment") }) {
             Assert.Throws<ArgumentException>(() => new DarkWsClient(new DarkWsClientOptions { Endpoint = uri! }));
@@ -597,7 +597,7 @@ public sealed class ClientTests {
         Assert.Throws<ArgumentNullException>(() => client.On<int>("n", null!));
         Assert.Throws<ArgumentNullException>(() => client.OnAsync<int>("n", null!));
         Assert.Throws<ArgumentException>(() => client.AuthenticateAsync(" "));
-        Assert.ThrowsAsync<ArgumentException>(() => client.RequestAsync(" "));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.RequestAsync(" "));
     }
 
     [Test]
@@ -613,7 +613,7 @@ public sealed class ClientTests {
         Assert.That(first, Is.Not.SameAs(second));
         await first.AuthenticateAsync("valid");
         Assert.That(await first.RequestAsync<int>("private:value"), Is.EqualTo(123));
-        Assert.ThrowsAsync<DarkWsResponseException>(() => second.RequestAsync("private:value"));
+        await Assert.ThrowsAsync<DarkWsResponseException>(() => second.RequestAsync("private:value"));
         await firstScope.DisposeAsync();
         Assert.That(await second.RequestAsync<int>("echo:value", 3), Is.EqualTo(3));
     }
@@ -669,7 +669,7 @@ public sealed class ClientTests {
         var socket = await server.AcceptAsync();
         await TestServer.RequestAsync(socket);
         var close = client.CloseAsync();
-        Assert.ThrowsAsync<DarkWsConnectionException>(async () => await pending);
+        await Assert.ThrowsAsync<DarkWsConnectionException>(async () => await pending);
         Assert.That(await TestServer.ReadAsync(socket), Is.EqualTo("close"));
         await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
         await close;
@@ -678,7 +678,7 @@ public sealed class ClientTests {
         await using var blocked = Client(server, options => options.ConfigureWebSocketOptionsAsync = async (_, token) => await Task.Delay(Timeout.Infinite, token));
         var connecting = blocked.ConnectAsync();
         await blocked.CloseAsync();
-        Assert.ThrowsAsync<DarkWsConnectionException>(async () => await connecting);
+        await Assert.ThrowsAsync<DarkWsConnectionException>(async () => await connecting);
     }
 
     [Test]
@@ -688,10 +688,10 @@ public sealed class ClientTests {
             options.Reconnect = true;
             options.ConfigureWebSocketOptionsAsync = (_, _) => throw new InvalidOperationException("secret token");
         });
-        var failure = Assert.ThrowsAsync<DarkWsConnectionException>(() => configured.ConnectAsync())!;
+        var failure = (await Assert.ThrowsAsync<DarkWsConnectionException>(() => configured.ConnectAsync()))!;
         Assert.That(failure.ToString(), Does.Not.Contain("secret token"));
         await using var provider = Client(server, options => { options.AuthenticationTokenProvider = _ => throw new InvalidOperationException("secret token"); });
-        failure = Assert.ThrowsAsync<DarkWsConnectionException>(() => provider.ConnectAsync())!;
+        failure = (await Assert.ThrowsAsync<DarkWsConnectionException>(() => provider.ConnectAsync()))!;
         Assert.That(failure.ToString(), Does.Not.Contain("secret token"));
     }
 
@@ -704,10 +704,10 @@ public sealed class ClientTests {
         // The peer deliberately never reads: this exceeds TCP buffers on supported test hosts.
         var large = client.RequestAsync("large", new string('x', 32 * 1024 * 1024));
         var small = client.RequestAsync("queued");
-        var failure = Assert.CatchAsync<Exception>(async () => await large)!;
+        var failure = (await Assert.CatchAsync<Exception>(async () => await large))!;
         Assert.That(failure, Is.TypeOf<DarkWsTimeoutException>());
         Assert.That(((DarkWsTimeoutException)failure).Stage, Is.EqualTo(DarkWsTimeoutStage.Send));
-        Assert.CatchAsync<Exception>(async () => await small);
+        await Assert.CatchAsync<Exception>(async () => await small);
     }
 
     [Test]

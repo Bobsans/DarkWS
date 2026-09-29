@@ -46,11 +46,11 @@ internal sealed class Broadcaster(
         return PublishAsync(DarkWsTarget.Group, group, action, ToElement(data), cancellationToken);
     }
 
-    public Task BroadcastToGroupsAsync(IEnumerable<string> groups, string action, DarkWsBroadcastExclusion? except = null, CancellationToken cancellationToken = default) {
+    public Task BroadcastToGroupsAsync(IEnumerable<string> groups, string action, DarkWsBroadcastExclusion? except, CancellationToken cancellationToken) {
         return PublishGroupsAsync(groups, action, null, except, cancellationToken);
     }
 
-    public Task BroadcastToGroupsAsync<T>(IEnumerable<string> groups, string action, T? data, DarkWsBroadcastExclusion? except = null, CancellationToken cancellationToken = default) {
+    public Task BroadcastToGroupsAsync<T>(IEnumerable<string> groups, string action, T? data, DarkWsBroadcastExclusion? except, CancellationToken cancellationToken) {
         return PublishGroupsAsync(groups, action, ToElement(data), except, cancellationToken);
     }
 

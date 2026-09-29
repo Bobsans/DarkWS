@@ -70,11 +70,11 @@ public sealed class PublicContractTests {
     }
 
     [Test]
-    public void PublicBoundariesReportTheNullArgument() {
+    public async Task PublicBoundariesReportTheNullArgument() {
         using var connection = new WebSocketConnection(new TestWebSocket(), new DefaultHttpContext(), null);
         var storage = new ConnectionStorage();
         var options = new DarkWsOptions();
-        var cases = new (TestDelegate Call, string Parameter)[] {
+        var cases = new (Action Call, string Parameter)[] {
             (() => storage.Add(null!), "connection"),
             (() => storage.Remove(null!), "connection"),
             (() => storage.GetByConnection(null!), "connectionId"),
@@ -98,7 +98,7 @@ public sealed class PublicContractTests {
             Assert.That(Assert.Throws<ArgumentNullException>(call)!.ParamName, Is.EqualTo(parameter));
         }
 
-        Assert.That(Assert.ThrowsAsync<ArgumentNullException>(async () => await connection.SendAsync(null!))!.ParamName, Is.EqualTo("data"));
+        Assert.That((await Assert.ThrowsAsync<ArgumentNullException>(async () => await connection.SendAsync(null!)))!.ParamName, Is.EqualTo("data"));
         foreach (var response in new IResponse[] { new SuccessResponse(), new SuccessResponse<int>(1), new ErrorResponse("error"), new ErrorResponse<int>("error", 1) }) {
             Assert.That(Assert.Throws<ArgumentNullException>(() => response.WriteResultAsync(null!))!.ParamName, Is.EqualTo("context"));
         }

@@ -357,26 +357,28 @@ public sealed class ConnectionLimitsTests {
         }
 
         socket.EnqueueReceive("next");
+        var receiveIdleTimeout = TimeSpan.FromMilliseconds(400);
         using var connection = new WebSocketConnection(socket, new DefaultHttpContext(), null) {
-            ReceiveIdleTimeout = TimeSpan.FromMilliseconds(400)
+            ReceiveIdleTimeout = receiveIdleTimeout
         };
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         Assert.That(Encoding.UTF8.GetString((await connection.ReceiveMessageAsync(timeout.Token)).Data), Is.EqualTo("xxxxxxxxxx"));
         Assert.That(Encoding.UTF8.GetString((await connection.ReceiveMessageAsync(timeout.Token)).Data), Is.EqualTo("next"));
-        Assert.ThrowsAsync<WebSocketException>(async () => await connection.ReceiveMessageAsync(timeout.Token));
+        await Assert.ThrowsAsync<WebSocketException>(async () => await connection.ReceiveMessageAsync(timeout.Token));
         Assert.That(socket.WasAborted, Is.True);
     }
 
     [Test]
-    public void CallerCancellationIsNotReportedAsIdleTimeout() {
+    public async Task CallerCancellationIsNotReportedAsIdleTimeout() {
         var socket = new TestWebSocket();
+        var receiveIdleTimeout = TimeSpan.FromSeconds(10);
         using var connection = new WebSocketConnection(socket, new DefaultHttpContext(), null) {
-            ReceiveIdleTimeout = TimeSpan.FromSeconds(10)
+            ReceiveIdleTimeout = receiveIdleTimeout
         };
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
-        Assert.CatchAsync<OperationCanceledException>(async () => await connection.ReceiveMessageAsync(cancellation.Token));
+        await Assert.CatchAsync<OperationCanceledException>(async () => await connection.ReceiveMessageAsync(cancellation.Token));
         Assert.That(socket.WasAborted, Is.False);
     }
 

@@ -129,7 +129,7 @@ public sealed class HandlerTestingTests {
         cancellation.Cancel();
         await pending.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.That(connection.SentMessages, Has.Count.EqualTo(2));
-        Assert.ThrowsAsync<OperationCanceledException>(() => host.InvokeAsync(connection, "testing:secure", cancellationToken: cancellation.Token));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => host.InvokeAsync(connection, "testing:secure", cancellationToken: cancellation.Token));
     }
 
     [Test]
@@ -163,7 +163,7 @@ public sealed class HandlerTestingTests {
         using var foreign = new DarkWsTestConnection();
         Assert.Throws<ArgumentException>(() => host.CreateScope(foreign));
         Assert.Throws<ArgumentNullException>(() => host.CreateScope(null!));
-        Assert.ThrowsAsync<ArgumentException>(() => host.InvokeAsync(connection, " "));
+        await Assert.ThrowsAsync<ArgumentException>(() => host.InvokeAsync(connection, " "));
         connection.Dispose();
         Assert.Throws<InvalidOperationException>(() => host.CreateScope(connection));
         await host.DisposeAsync();

@@ -83,22 +83,52 @@ public abstract class HandlerBase {
     }
 
     /// <summary>Publishes to one group with exclusions; use Connection.Id to exclude this handler's connection.</summary>
-    protected Task BroadcastToGroupAsync(string group, string action, DarkWsBroadcastExclusion except, CancellationToken cancellationToken = default) {
+    protected Task BroadcastToGroupAsync(string group, string action, DarkWsBroadcastExclusion except) {
+        return BroadcastToGroupAsync(group, action, except, CancellationToken.None);
+    }
+
+    /// <summary>Publishes to one group with exclusions; use Connection.Id to exclude this handler's connection.</summary>
+    protected Task BroadcastToGroupAsync(string group, string action, DarkWsBroadcastExclusion except, CancellationToken cancellationToken) {
         return Context.Broadcaster.BroadcastToGroupAsync(group, action, except, cancellationToken);
     }
 
     /// <summary>Publishes data to one group with explicit connection/session exclusions.</summary>
-    protected Task BroadcastToGroupAsync<T>(string group, string action, T? data, DarkWsBroadcastExclusion except, CancellationToken cancellationToken = default) {
+    protected Task BroadcastToGroupAsync<T>(string group, string action, T? data, DarkWsBroadcastExclusion except) {
+        return BroadcastToGroupAsync(group, action, data, except, CancellationToken.None);
+    }
+
+    /// <summary>Publishes data to one group with explicit connection/session exclusions.</summary>
+    protected Task BroadcastToGroupAsync<T>(string group, string action, T? data, DarkWsBroadcastExclusion except, CancellationToken cancellationToken) {
         return Context.Broadcaster.BroadcastToGroupAsync(group, action, data, except, cancellationToken);
     }
 
+    /// <summary>Publishes once to a group union with no duplicate recipients.</summary>
+    protected Task BroadcastToGroupsAsync(IEnumerable<string> groups, string action) {
+        return BroadcastToGroupsAsync(groups, action, null, CancellationToken.None);
+    }
+
     /// <summary>Publishes once to a group union, with optional exclusions and no duplicate recipients.</summary>
-    protected Task BroadcastToGroupsAsync(IEnumerable<string> groups, string action, DarkWsBroadcastExclusion? except = null, CancellationToken cancellationToken = default) {
+    protected Task BroadcastToGroupsAsync(IEnumerable<string> groups, string action, DarkWsBroadcastExclusion? except) {
+        return BroadcastToGroupsAsync(groups, action, except, CancellationToken.None);
+    }
+
+    /// <summary>Publishes once to a group union, with optional exclusions and no duplicate recipients.</summary>
+    protected Task BroadcastToGroupsAsync(IEnumerable<string> groups, string action, DarkWsBroadcastExclusion? except, CancellationToken cancellationToken) {
         return Context.Broadcaster.BroadcastToGroupsAsync(groups, action, except, cancellationToken);
     }
 
+    /// <summary>Publishes data once to a group union with no duplicate recipients.</summary>
+    protected Task BroadcastToGroupsAsync<T>(IEnumerable<string> groups, string action, T? data) {
+        return BroadcastToGroupsAsync(groups, action, data, null, CancellationToken.None);
+    }
+
     /// <summary>Publishes data once to a group union, with optional exclusions and no duplicate recipients.</summary>
-    protected Task BroadcastToGroupsAsync<T>(IEnumerable<string> groups, string action, T? data, DarkWsBroadcastExclusion? except = null, CancellationToken cancellationToken = default) {
+    protected Task BroadcastToGroupsAsync<T>(IEnumerable<string> groups, string action, T? data, DarkWsBroadcastExclusion? except) {
+        return BroadcastToGroupsAsync(groups, action, data, except, CancellationToken.None);
+    }
+
+    /// <summary>Publishes data once to a group union, with optional exclusions and no duplicate recipients.</summary>
+    protected Task BroadcastToGroupsAsync<T>(IEnumerable<string> groups, string action, T? data, DarkWsBroadcastExclusion? except, CancellationToken cancellationToken) {
         return Context.Broadcaster.BroadcastToGroupsAsync(groups, action, data, except, cancellationToken);
     }
 }

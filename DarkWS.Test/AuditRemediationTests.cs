@@ -71,12 +71,12 @@ public sealed class AuditRemediationTests {
     }
 
     [Test]
-    public void InvalidFinalConfigurationFailsOnHostStartup() {
+    public async Task InvalidFinalConfigurationFailsOnHostStartup() {
         using var host = new HostBuilder().ConfigureServices(services => {
             services.AddDarkWs();
             services.PostConfigure<DarkWsOptions>(options => options.ShutdownTimeout = TimeSpan.Zero);
         }).Build();
-        Assert.ThrowsAsync<OptionsValidationException>(async () => await host.StartAsync());
+        await Assert.ThrowsAsync<OptionsValidationException>(async () => await host.StartAsync());
     }
 
     [TestCase("input", "", true)]
@@ -278,20 +278,20 @@ public sealed class AuditRemediationTests {
     }
 
     [Test]
-    public void SendTimeoutAbortsSocket() {
+    public async Task SendTimeoutAbortsSocket() {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var socket = new TestWebSocket { SendBarrier = gate.Task };
         using var connection = new WebSocketConnection(socket, new DefaultHttpContext(), null) { SendTimeout = TimeSpan.FromMilliseconds(50) };
-        Assert.ThrowsAsync<TimeoutException>(async () => await connection.SendAsync([1]));
+        await Assert.ThrowsAsync<TimeoutException>(async () => await connection.SendAsync([1]));
         Assert.That(socket.WasAborted, Is.True);
     }
 
     [Test]
-    public void OversizeCloseOutputIsBounded() {
+    public async Task OversizeCloseOutputIsBounded() {
         var socket = new TestWebSocket { CloseBarrier = new TaskCompletionSource().Task };
         socket.EnqueueReceive("too large");
         using var connection = new WebSocketConnection(socket, new DefaultHttpContext(), null, 1) { SendTimeout = TimeSpan.FromMilliseconds(50) };
-        Assert.ThrowsAsync<TimeoutException>(async () => await connection.ReceiveMessageAsync());
+        await Assert.ThrowsAsync<TimeoutException>(async () => await connection.ReceiveMessageAsync());
         Assert.That(socket.WasAborted, Is.True);
     }
 
@@ -437,7 +437,7 @@ public sealed class AuditRemediationTests {
         var client = host.GetTestServer().CreateWebSocketClient();
         var uri = new Uri("ws://localhost/ws?token=throws");
         if (throws && !acceptAnonymous) {
-            var error = Assert.ThrowsAsync<InvalidOperationException>(async () => await client.ConnectAsync(uri, CancellationToken.None));
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(async () => await client.ConnectAsync(uri, CancellationToken.None));
             Assert.That(error!.Message, Does.Contain("401"));
             Assert.That(host.Services.GetRequiredService<ConnectionStorage>().GetAll(), Is.Empty);
         } else {
@@ -465,7 +465,7 @@ public sealed class AuditRemediationTests {
             .ConnectAsync(new Uri("ws://localhost/ws?token=wait-for-cancellation"), cancellation.Token);
         await probe.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         cancellation.Cancel();
-        Assert.CatchAsync<OperationCanceledException>(async () => await connecting);
+        await Assert.CatchAsync<OperationCanceledException>(async () => await connecting);
         await probe.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await host.StopAsync();
         Assert.That(probe.Logs, Has.None.EqualTo("DarkWS upgrade authentication failed"));

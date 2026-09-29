@@ -86,22 +86,22 @@ public sealed class RedisBackplaneTests {
     }
 
     [Test]
-    public void NullListenerIsRejected() {
+    public async Task NullListenerIsRejected() {
         var channel = $"darkws-test:{Guid.NewGuid():N}";
         using var provider = CreateProvider(channel);
         var backplane = provider.GetRequiredService<IDarkWsBackplane>();
 
-        Assert.ThrowsAsync<ArgumentNullException>(async () =>
+        await Assert.ThrowsAsync<ArgumentNullException>(async () =>
             await backplane.SubscribeAsync(null!));
     }
 
     [Test]
-    public void UnsubscribeBeforeSubscribeIsANoop() {
+    public async Task UnsubscribeBeforeSubscribeIsANoop() {
         var channel = $"darkws-test:{Guid.NewGuid():N}";
         using var provider = CreateProvider(channel);
         var backplane = provider.GetRequiredService<IDarkWsBackplane>();
 
-        Assert.DoesNotThrowAsync(async () => {
+        await Assert.DoesNotThrowAsync(async () => {
             await backplane.UnsubscribeAsync();
             await backplane.UnsubscribeAsync();
         });
@@ -158,7 +158,7 @@ public sealed class RedisBackplaneTests {
     }
 
     [Test]
-    public void CancelledOperationsStopBeforeRedisIo() {
+    public async Task CancelledOperationsStopBeforeRedisIo() {
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         var channel = $"darkws-test:{Guid.NewGuid():N}";
@@ -166,12 +166,12 @@ public sealed class RedisBackplaneTests {
         var backplane = provider.GetRequiredService<IDarkWsBackplane>();
         var message = new DarkWsBroadcast(DarkWsTarget.All, null, "cancelled", null);
 
-        Assert.Multiple(() => {
-            Assert.ThrowsAsync<OperationCanceledException>(async () =>
+        await Assert.MultipleAsync(async () => {
+            await Assert.ThrowsAsync<OperationCanceledException>(async () =>
                 await backplane.PublishAsync(message, cancellation.Token));
-            Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await Assert.ThrowsAsync<OperationCanceledException>(async () =>
                 await backplane.SubscribeAsync((_, _) => ValueTask.CompletedTask, cancellation.Token));
-            Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await Assert.ThrowsAsync<OperationCanceledException>(async () =>
                 await backplane.UnsubscribeAsync(cancellation.Token));
         });
     }
@@ -218,7 +218,7 @@ public sealed class RedisBackplaneTests {
             Interlocked.Increment(ref oldCalls);
             return ValueTask.CompletedTask;
         });
-        Assert.ThrowsAsync<InvalidOperationException>(async () => await backplane.SubscribeAsync((_, _) => ValueTask.CompletedTask));
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await backplane.SubscribeAsync((_, _) => ValueTask.CompletedTask));
         await backplane.UnsubscribeAsync();
         var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var calls = 0;
@@ -305,17 +305,23 @@ public sealed class RedisBackplaneTests {
         var saturated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await backplane.SubscribeAsync(async (_, token) => {
-            if (Interlocked.Increment(ref started) == 16) saturated.TrySetResult();
+            if (Interlocked.Increment(ref started) == 16) {
+                saturated.TrySetResult();
+            }
+
             try {
                 await Task.Delay(Timeout.InfiniteTimeSpan, token);
             } finally {
-                if (Interlocked.Increment(ref stopped) == 16) cancelled.TrySetResult();
+                if (Interlocked.Increment(ref stopped) == 16) {
+                    cancelled.TrySetResult();
+                }
             }
         });
         try {
             for (var index = 0; index < 64; index++) {
                 await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "blocked", null));
             }
+
             await saturated.Task.WaitAsync(TimeSpan.FromSeconds(10));
             await backplane.UnsubscribeAsync();
             await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -347,12 +353,14 @@ public sealed class RedisBackplaneTests {
                     published++;
                     await Task.Delay(10, deadline.Token);
                 }
+
                 retained.Add(GC.GetTotalMemory(forceFullCollection: true));
                 var stats = slow.Stats;
                 TestContext.Progress.WriteLine($"Redis load: published={published}, pending={published - stats.Completed}, peak={stats.Peak}, retained={retained[^1]} bytes");
                 Assert.That(stats.Peak, Is.LessThanOrEqualTo(16));
                 Assert.That(published - stats.Completed, Is.LessThanOrEqualTo(64));
             }
+
             Assert.That(retained.Max() - retained.Min(), Is.LessThan(8L * 1024 * 1024));
             while (slow.Stats.Completed < published) {
                 await Task.Delay(10, deadline.Token);
@@ -410,7 +418,8 @@ public sealed class RedisBackplaneTests {
             }
         });
         try {
-            var except = excludeSession ? new DarkWsBroadcastExclusion { SessionId = "user" }
+            var except = excludeSession
+                ? new DarkWsBroadcastExclusion { SessionId = "user" }
                 : new DarkWsBroadcastExclusion { ConnectionId = sender.Id };
             var broadcaster = first.GetRequiredService<IBroadcaster>();
             await broadcaster.BroadcastToGroupsAsync<string?>(["a", "b", "a"], "updated", null, except);
@@ -420,10 +429,11 @@ public sealed class RedisBackplaneTests {
             DarkWsTestConnection[] connections = [sender, otherTab, otherUser, unrelated];
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             while (connections.Any(connection => !connection.SentMessages.Any(bytes => HasAction(bytes, "barrier"))) ||
-                   !otherUser.SentMessages.Any(bytes => HasAction(bytes, "updated")) ||
-                   !excludeSession && !otherTab.SentMessages.Any(bytes => HasAction(bytes, "updated"))) {
+                !otherUser.SentMessages.Any(bytes => HasAction(bytes, "updated")) ||
+                !excludeSession && !otherTab.SentMessages.Any(bytes => HasAction(bytes, "updated"))) {
                 await Task.Delay(10, deadline.Token);
             }
+
             Assert.That(publications, Has.Count.EqualTo(1));
             using var envelope = JsonDocument.Parse(publications.Single());
             Assert.That(envelope.RootElement.GetProperty("target").GetInt32(), Is.EqualTo(4));
@@ -459,9 +469,13 @@ public sealed class RedisBackplaneTests {
         private int _active;
         private int _peak;
         private int _completed;
+
         public (int Active, int Peak, int Completed) Stats {
-            get { lock (_stats) { return (_active, _peak, _completed); } }
+            get {
+                lock (_stats) { return (_active, _peak, _completed); }
+            }
         }
+
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public string Id { get; } = Guid.NewGuid().ToString("N");
         public WebSocket WebSocket => throw new NotSupportedException();
@@ -471,11 +485,13 @@ public sealed class RedisBackplaneTests {
         public IReadOnlyCollection<string> Groups => [group];
         public bool IsOpen { get; private set; } = true;
         public Task<ReceivedMessage> ReceiveMessageAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public async Task SendAsync(byte[] data, CancellationToken cancellationToken = default) {
             lock (_stats) {
                 _active++;
                 _peak = Math.Max(_peak, _active);
             }
+
             Started.TrySetResult();
             try {
                 if (slow) {
@@ -488,13 +504,18 @@ public sealed class RedisBackplaneTests {
                 }
             }
         }
+
         public Task CloseAsync(CancellationToken cancellationToken = default) {
             IsOpen = false;
             return Task.CompletedTask;
         }
+
         public void Abort() {
-            if (!stayOpenOnAbort) IsOpen = false;
+            if (!stayOpenOnAbort) {
+                IsOpen = false;
+            }
         }
+
         public void Dispose() => IsOpen = false;
     }
 
@@ -506,6 +527,7 @@ public sealed class RedisBackplaneTests {
         if (useRedis) {
             services.AddDarkWsRedis(channel);
         }
+
         return services.BuildServiceProvider();
     }
 }

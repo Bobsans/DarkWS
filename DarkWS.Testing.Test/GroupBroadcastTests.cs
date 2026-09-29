@@ -71,7 +71,9 @@ public sealed class GroupBroadcastTests {
         var enumerations = 0;
         IEnumerable<string> Once() {
             enumerations++;
-            foreach (var group in groups) yield return group;
+            foreach (var group in groups) {
+                yield return group;
+            }
         }
         await broadcaster.BroadcastToGroupsAsync(Once(), "snapshot");
         groups[0] = "changed";
@@ -85,7 +87,7 @@ public sealed class GroupBroadcastTests {
         Assert.Throws<ArgumentException>(() => broadcaster.BroadcastToGroupsAsync(["a"], "invalid", except: new DarkWsBroadcastExclusion { SessionId = " " }));
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
-        Assert.Throws<OperationCanceledException>(() => broadcaster.BroadcastToGroupsAsync(["a"], "cancelled", cancellationToken: cancelled.Token));
+        Assert.Throws<OperationCanceledException>(() => broadcaster.BroadcastToGroupsAsync(["a"], "cancelled", null, cancelled.Token));
         Assert.That(host.Broadcasts, Has.Count.EqualTo(3));
     }
 

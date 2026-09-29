@@ -18,4 +18,8 @@
   <ItemGroup>
     <ProjectReference Include="..\DarkWS\DarkWS.csproj"/>
   </ItemGroup>
+
+  <ItemGroup>
+    <PackageVersion Update="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.31" />
+  </ItemGroup>
 </Project>

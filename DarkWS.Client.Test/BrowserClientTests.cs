@@ -142,17 +142,17 @@ public sealed class BrowserClientTests {
             }
         };
 
-        Assert.That(Assert.ThrowsAsync<DarkWsResponseException>(() => client.ConnectAsync())!.Code, Is.EqualTo("auth:failed"));
+        Assert.That((await Assert.ThrowsAsync<DarkWsResponseException>(() => client.ConnectAsync()))!.Code, Is.EqualTo("auth:failed"));
         var rejected = await disconnected.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
         Assert.That(rejected.Reason, Is.TypeOf<DarkWsResponseException>());
-        Assert.ThrowsAsync<DarkWsConnectionException>(() => client.RequestAsync("anonymous"));
+        await Assert.ThrowsAsync<DarkWsConnectionException>(() => client.RequestAsync("anonymous"));
         Assert.That(server.Connections, Is.EqualTo(1));
 
         token = "valid";
         await client.ConnectAsync();
-        Assert.ThrowsAsync<DarkWsConnectionException>(() => client.RequestAsync("drop"));
+        await Assert.ThrowsAsync<DarkWsConnectionException>(() => client.RequestAsync("drop"));
         await disconnected.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.ThrowsAsync<DarkWsConnectionException>(() => client.RequestAsync("recovered"));
+        await Assert.ThrowsAsync<DarkWsConnectionException>(() => client.RequestAsync("recovered"));
         Assert.That(server.Connections, Is.EqualTo(2));
         await client.ConnectAsync();
         Assert.That(await client.RequestAsync<int>("recovered"), Is.EqualTo(42));
