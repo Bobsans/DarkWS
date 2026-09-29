@@ -100,8 +100,11 @@ or `Task<IResponse>` with zero or one payload parameter. Unsupported signatures
 The standard `Configure`, configuration binding, and `PostConfigure` pipeline is
 supported. Final options are validated on resolution and host startup with
 `OptionsValidationException`. Existing connections and singleton services retain
-their captured settings. Non-nullable parameters require a non-null payload;
-nullable parameters permit omitted/null values. Invalid payloads return
+their captured settings. Non-nullable parameters require a non-null payload by
+default; nullable parameters permit omitted/null values. Set `AllowNullPayloads = true`
+to ignore reference parameter nullability annotations and let handlers receive null,
+including when `data` is omitted. It does not allow CLR null for non-nullable value
+types or disable JSON type/range validation. Invalid payloads return
 `darkws:error:invalid-request` before constructing or invoking the handler.
 
 An injected `IDarkWsContextAccessor` is initialized only inside a message scope.

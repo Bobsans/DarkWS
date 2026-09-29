@@ -13,6 +13,9 @@ public sealed class DarkWsOptions {
     /// <summary>JSON settings for envelopes and payloads. Defaults to web conventions; must not be null.</summary>
     public JsonSerializerOptions JsonOptions { get; set; } = new(JsonSerializerDefaults.Web);
 
+    /// <summary>Allows null payloads for reference parameters regardless of nullable annotations. Default false enforces annotations. Missing data is also treated as null; non-nullable value types still cannot receive CLR null.</summary>
+    public bool AllowNullPayloads { get; set; }
+
     /// <summary>Maximum in-flight requests per connection. Default 16; as many more wait in order while reading continues.</summary>
     public int MaxConcurrentRequestsPerConnection { get; set; } = 16;
 

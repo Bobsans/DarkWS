@@ -234,7 +234,10 @@ Each `auth:` command resolves `IDarkWsAuthenticator` from its own scope. Lifecyc
 middleware and the authenticator of the upgrade request live in that request's
 scope for the whole connection; resolve short-lived dependencies such as a
 `DbContext` through `IServiceScopeFactory` inside them. A nullable action parameter permits missing
-or null payloads. Non-nullable parameters require a payload; malformed values and
+or null payloads. By default, non-nullable parameters require a payload. Set
+`DarkWsOptions.AllowNullPayloads = true` to pass omitted/null data to reference
+parameters even when their annotations say non-nullable. Handlers must then handle
+null themselves. Non-nullable value types still cannot receive CLR null; malformed values and
 numeric overflows return `darkws:error:invalid-request` without invoking the handler.
 
 Results are serialized before the message scope is disposed, so a deferred query

@@ -8,6 +8,10 @@ include migration guidance before a release is published.
 
 ### Added
 
+- `DarkWsOptions.AllowNullPayloads` (default false) permits omitted/null data for
+  reference action parameters regardless of their nullable annotations. Both sync
+  and async handlers receive null directly. Non-nullable value types and malformed
+  non-null payloads retain their existing validation.
 - `DarkWsOptions.AcceptAnonymousOnUpgradeAuthenticationException` (default false)
   and `KeepSessionOnFailedAuthentication` (default false). Failed `auth:` commands
   can retain the current session, principal, and indexes without a lifecycle hook;

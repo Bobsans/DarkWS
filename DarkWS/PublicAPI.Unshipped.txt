@@ -1,4 +1,6 @@
 #nullable enable
+DarkWS.DarkWsOptions.AllowNullPayloads.get -> bool
+DarkWS.DarkWsOptions.AllowNullPayloads.set -> void
 DarkWS.DarkWsOptions.AcceptAnonymousOnUpgradeAuthenticationException.get -> bool
 DarkWS.DarkWsOptions.AcceptAnonymousOnUpgradeAuthenticationException.set -> void
 DarkWS.DarkWsOptions.KeepSessionOnFailedAuthentication.get -> bool

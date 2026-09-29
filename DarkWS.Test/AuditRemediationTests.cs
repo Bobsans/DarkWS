@@ -106,6 +106,58 @@ public sealed class AuditRemediationTests {
         await accept.WaitAsync(TimeSpan.FromSeconds(2));
     }
 
+    [TestCase(false, false)]
+    [TestCase(false, true)]
+    [TestCase(true, false)]
+    [TestCase(true, true)]
+    public async Task NullPayloadOptionOnlyRelaxesReferenceAnnotations(bool allowNullPayloads, bool explicitNull) {
+        await using var provider = CreateProvider(options => {
+            if (allowNullPayloads) {
+                options.AllowNullPayloads = true;
+            }
+        });
+        var socket = new TestWebSocket();
+        var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(CreateConnection(provider, socket));
+        var probe = provider.GetRequiredService<Probe>();
+        var expectedCalls = 0;
+        foreach (var action in new[] { "accept-null", "async-accept-null", "nullable", "nullable-number", "number" }) {
+            var data = explicitNull ? ",\"data\":null" : "";
+            socket.EnqueueReceive($$"""{"id":"null","action":"audit:{{action}}"{{data}}}""");
+            await UntilAsync(() => socket.Sent.Count == 1);
+            socket.Sent.TryDequeue(out var bytes);
+            using var response = JsonDocument.Parse(bytes!);
+            var acceptsNull = action is "nullable" or "nullable-number" ||
+                (allowNullPayloads && action is "accept-null" or "async-accept-null");
+            if (acceptsNull) {
+                expectedCalls++;
+                var result = response.RootElement.GetProperty("data");
+                if (action is "accept-null" or "async-accept-null") {
+                    Assert.That(result.GetBoolean(), Is.True);
+                } else {
+                    Assert.That(result.ValueKind, Is.EqualTo(JsonValueKind.Null));
+                }
+            } else {
+                Assert.That(response.RootElement.GetProperty("error").GetString(), Is.EqualTo("darkws:error:invalid-request"));
+            }
+            Assert.That(probe.Calls, Is.EqualTo(expectedCalls));
+        }
+
+        // Relaxing null annotations must not disable JSON type checks or numeric range checks.
+        foreach (var request in new[] {
+            "{\"id\":\"bad\",\"action\":\"audit:input\",\"data\":42}",
+            "{\"id\":\"bad\",\"action\":\"audit:number\",\"data\":99999999999}"
+        }) {
+            socket.EnqueueReceive(request);
+            await UntilAsync(() => socket.Sent.Count == 1);
+            socket.Sent.TryDequeue(out var bytes);
+            Assert.That(JsonSerializer.Deserialize<ErrorMessage>(bytes!, Utils.JsonOptions),
+                Is.EqualTo(new ErrorMessage("bad", "darkws:error:invalid-request")));
+            Assert.That(probe.Calls, Is.EqualTo(expectedCalls));
+        }
+        socket.EnqueueClose();
+        await accept.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
     [Test]
     public async Task HandlerJsonExceptionRemainsServerFailureAndSendFailureIsObserved() {
         await using var provider = CreateProvider();
@@ -595,6 +647,18 @@ public sealed class AuditRemediationTests {
 
     [Handler("audit"), AllowAnonymous]
     public sealed class AuditHandler(Probe probe, ScopeLifetime lifetime) : HandlerBase {
+        [Action("accept-null")]
+        public IResponse AcceptNull(Payload input) {
+            probe.Calls++;
+            return Ok(input is null);
+        }
+
+        [Action("async-accept-null")]
+        public Task<IResponse> AcceptNullAsync(Payload input) {
+            probe.Calls++;
+            return Task.FromResult(Ok(input is null));
+        }
+
         [Action("input")]
         public IResponse Input(Payload input) {
             _ = lifetime;

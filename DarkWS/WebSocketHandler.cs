@@ -207,7 +207,7 @@ internal sealed class WebSocketHandler(
         try {
             object? parameter;
             try {
-                parameter = action.DeserializeParameter(message.Payload, _options.JsonOptions);
+                parameter = action.DeserializeParameter(message.Payload, _options.JsonOptions, _options.AllowNullPayloads);
             } catch (Exception error) when (error is JsonException or NotSupportedException) {
                 Log.InvalidPayload(logger, message.Action, error);
                 return new ErrorResponse(_options.InvalidRequestError);
