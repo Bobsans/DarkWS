@@ -94,6 +94,25 @@ public sealed class ConnectionStorage {
         return index.TryGetValue(key, out var ids) ? ids.Select(id => _connections[id].Connection).ToArray() : [];
     }
 
+    // Select and exclude from one indexed snapshot, including the session used to index each connection.
+    internal IReadOnlyCollection<IWebSocketConnection> GetByGroups(IReadOnlyList<string> groups, DarkWsBroadcastExclusion? except) {
+        lock (_sync) {
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var group in groups) {
+                if (_groups.TryGetValue(group, out var members)) {
+                    ids.UnionWith(members);
+                }
+            }
+            if (except?.ConnectionId is { } connectionId) {
+                ids.Remove(connectionId);
+            }
+            if (except?.SessionId is { } sessionId && _sessions.TryGetValue(sessionId, out var sessionMembers)) {
+                ids.ExceptWith(sessionMembers);
+            }
+            return ids.Select(id => _connections[id].Connection).ToArray();
+        }
+    }
+
     private static void AddIndex(Dictionary<string, HashSet<string>> index, string key, string id) {
         if (!index.TryGetValue(key, out var ids)) {
             index.Add(key, ids = new HashSet<string>(StringComparer.Ordinal));

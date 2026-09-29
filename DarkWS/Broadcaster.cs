@@ -46,6 +46,24 @@ internal sealed class Broadcaster(
         return PublishAsync(DarkWsTarget.Group, group, action, ToElement(data), cancellationToken);
     }
 
+    public Task BroadcastToGroupsAsync(IEnumerable<string> groups, string action, DarkWsBroadcastExclusion? except = null, CancellationToken cancellationToken = default) {
+        return PublishGroupsAsync(groups, action, null, except, cancellationToken);
+    }
+
+    public Task BroadcastToGroupsAsync<T>(IEnumerable<string> groups, string action, T? data, DarkWsBroadcastExclusion? except = null, CancellationToken cancellationToken = default) {
+        return PublishGroupsAsync(groups, action, ToElement(data), except, cancellationToken);
+    }
+
+    private Task PublishGroupsAsync(IEnumerable<string> groups, string action, JsonElement? data, DarkWsBroadcastExclusion? except, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(groups);
+        ArgumentException.ThrowIfNullOrWhiteSpace(action);
+        cancellationToken.ThrowIfCancellationRequested();
+        var groupIds = groups.Distinct(StringComparer.Ordinal).ToArray();
+        var message = new DarkWsBroadcast(DarkWsTarget.Groups, null, action, data) { Groups = groupIds, Except = except };
+        message.ValidateGroupSelection();
+        return groupIds.Length == 0 ? Task.CompletedTask : backplane.PublishAsync(message, cancellationToken).AsTask();
+    }
+
     private Task PublishAsync(
         DarkWsTarget target,
         string? targetId,
@@ -68,11 +86,13 @@ internal sealed class Broadcaster(
         DarkWsBroadcast message,
         CancellationToken cancellationToken
     ) {
+        message.ValidateGroupSelection();
         var connections = message.Target switch {
             DarkWsTarget.All => storage.GetAll(),
             DarkWsTarget.Connection => storage.GetByConnection(RequireTargetId(message)),
             DarkWsTarget.Session => storage.GetBySession(RequireTargetId(message)),
             DarkWsTarget.Group => storage.GetByGroup(RequireTargetId(message)),
+            DarkWsTarget.Groups => storage.GetByGroups(message.Groups!, message.Except),
             _ => throw new ArgumentOutOfRangeException(nameof(message), message.Target, null)
         };
 

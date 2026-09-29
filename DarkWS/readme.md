@@ -3,6 +3,16 @@
 ASP.NET Core WebSocket request/response library with typed sessions and an
 in-memory broadcast backplane.
 
+`BroadcastToGroupsAsync(groups, action, data, except: new DarkWsBroadcastExclusion { ConnectionId = Connection.Id })`
+publishes once to a group union and excludes the calling connection. Use `SessionId`
+to exclude all connections in a session, or set both ids. The no-data overload and
+matching `BroadcastToGroupAsync(..., except: ...)` overloads are also available on
+`IBroadcaster` and `HandlerBase`. Use the named `except` argument for exclusions.
+Overlapping groups receive one notification per connection. Empty groups publish
+nothing; null collections and blank group names/exclusion ids are invalid.
+Upgrade all Redis-connected nodes before using the new Groups=4 envelope; old nodes
+skip these messages. Existing single-target broadcasts keep their wire format.
+
 ```csharp
 builder.Services
     .AddDarkWs()

@@ -2,7 +2,10 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DarkWS.Abstractions;
+using DarkWS.Testing;
+using System.Security.Claims;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using NUnit.Framework;
 using StackExchange.Redis;
 using Testcontainers.Redis;
@@ -131,8 +134,11 @@ public sealed class RedisBackplaneTests {
         Assert.That(count, Is.Zero);
     }
 
-    [Test]
-    public async Task MalformedRedisMessageDoesNotBreakFollowingDeliveryAsync() {
+    [TestCase("{")]
+    [TestCase("{\"target\":4,\"action\":\"bad\"}")]
+    [TestCase("{\"target\":4,\"action\":\"bad\",\"groups\":[null]}")]
+    [TestCase("{\"target\":3,\"targetId\":\"g\",\"action\":\"bad\",\"except\":{\"sessionId\":\"s\"}}")]
+    public async Task MalformedRedisMessageDoesNotBreakFollowingDeliveryAsync(string invalid) {
         var channel = $"darkws-test:{Guid.NewGuid():N}";
         await using var provider = CreateProvider(channel);
         var backplane = provider.GetRequiredService<IDarkWsBackplane>();
@@ -141,7 +147,7 @@ public sealed class RedisBackplaneTests {
             received.TrySetResult(message);
             return ValueTask.CompletedTask;
         });
-        await _connection.GetSubscriber().PublishAsync(RedisChannel.Literal(channel), "{");
+        await _connection.GetSubscriber().PublishAsync(RedisChannel.Literal(channel), invalid);
 
         await backplane.PublishAsync(new DarkWsBroadcast(DarkWsTarget.All, null, "valid", null));
 
@@ -256,6 +262,79 @@ public sealed class RedisBackplaneTests {
         if (cancelCaller) {
             await backplane.UnsubscribeAsync();
         }
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task GroupUnionAndExclusionsAreDeliveredOnceAcrossInstances(bool excludeSession) {
+        var channel = $"darkws-test:{Guid.NewGuid():N}";
+        await using var first = CreateProvider(channel);
+        await using var second = CreateProvider(channel);
+        var firstService = first.GetRequiredService<IHostedService>();
+        var secondService = second.GetRequiredService<IHostedService>();
+        await firstService.StartAsync(default);
+        await secondService.StartAsync(default);
+        using var sender = new DarkWsTestConnection(new GroupSession("user", ["a", "b"]));
+        using var otherTab = new DarkWsTestConnection(new GroupSession("user", ["a", "b"]));
+        using var otherUser = new DarkWsTestConnection(new GroupSession("other", ["a", "b"]));
+        using var unrelated = new DarkWsTestConnection(new GroupSession("unrelated", ["c"]));
+        first.GetRequiredService<ConnectionStorage>().Add(sender);
+        var secondStorage = second.GetRequiredService<ConnectionStorage>();
+        secondStorage.Add(otherTab);
+        secondStorage.Add(otherUser);
+        secondStorage.Add(unrelated);
+        var publications = new ConcurrentQueue<string>();
+        var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var wire = await _connection.GetSubscriber().SubscribeAsync(RedisChannel.Literal(channel));
+        wire.OnMessage(message => {
+            using var json = JsonDocument.Parse(message.Message.ToString());
+            if (json.RootElement.GetProperty("action").GetString() == "updated") {
+                publications.Enqueue(message.Message.ToString());
+            } else {
+                barrier.TrySetResult();
+            }
+        });
+        try {
+            var except = excludeSession ? new DarkWsBroadcastExclusion { SessionId = "user" }
+                : new DarkWsBroadcastExclusion { ConnectionId = sender.Id };
+            var broadcaster = first.GetRequiredService<IBroadcaster>();
+            await broadcaster.BroadcastToGroupsAsync<string?>(["a", "b", "a"], "updated", null, except);
+            // Each subscriber processes the barrier after the tested broadcast; no sleep-based absence assertion.
+            await broadcaster.BroadcastAsync("barrier");
+            await barrier.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            DarkWsTestConnection[] connections = [sender, otherTab, otherUser, unrelated];
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (connections.Any(connection => !connection.SentMessages.Any(bytes => HasAction(bytes, "barrier")))) {
+                await Task.Delay(10, deadline.Token);
+            }
+            Assert.That(publications, Has.Count.EqualTo(1));
+            using var envelope = JsonDocument.Parse(publications.Single());
+            Assert.That(envelope.RootElement.GetProperty("target").GetInt32(), Is.EqualTo(4));
+            Assert.That(envelope.RootElement.GetProperty("groups").GetArrayLength(), Is.EqualTo(2));
+            Assert.That(envelope.RootElement.GetProperty("except").GetProperty(excludeSession ? "sessionId" : "connectionId").GetString(),
+                Is.EqualTo(excludeSession ? "user" : sender.Id));
+            Assert.That(sender.SentMessages.Count(bytes => HasAction(bytes, "updated")), Is.Zero);
+            Assert.That(otherTab.SentMessages.Count(bytes => HasAction(bytes, "updated")), Is.EqualTo(excludeSession ? 0 : 1));
+            Assert.That(otherUser.SentMessages.Count(bytes => HasAction(bytes, "updated")), Is.EqualTo(1));
+            Assert.That(unrelated.SentMessages.Count(bytes => HasAction(bytes, "updated")), Is.Zero);
+            using var delivered = JsonDocument.Parse(otherUser.SentMessages.Single(bytes => HasAction(bytes, "updated")));
+            Assert.That(delivered.RootElement.GetProperty("data").ValueKind, Is.EqualTo(JsonValueKind.Null));
+        } finally {
+            await wire.UnsubscribeAsync();
+            await firstService.StopAsync(default);
+            await secondService.StopAsync(default);
+        }
+    }
+
+    private static bool HasAction(byte[] bytes, string action) {
+        using var json = JsonDocument.Parse(bytes);
+        return json.RootElement.GetProperty("action").GetString() == action;
+    }
+
+    private sealed class GroupSession(string id, string[] groups) : IDarkWsSession {
+        public string Id => id;
+        public IReadOnlyCollection<string> Groups => groups;
+        public ClaimsPrincipal User { get; } = new(new ClaimsIdentity([], "test"));
     }
 
     private ServiceProvider CreateProvider(string channel, Action<DarkWsOptions>? configure = null) {

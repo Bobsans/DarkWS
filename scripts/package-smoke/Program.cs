@@ -27,6 +27,12 @@ await using (var testing = new DarkWsTestHost(darkWs => darkWs.AddHandlersFromAs
     await handler.Echo("direct").WriteResultAsync(new ResponseContext(fake, "direct", new DarkWsOptions()));
     if (fake.SentMessages.Count != 2)
         throw new InvalidOperationException("The installed testing package failed direct handler initialization.");
+    var sender = testing.CreateConnection(new SmokeGroupSession());
+    var recipient = testing.CreateConnection(new SmokeGroupSession());
+    await testing.Services.GetRequiredService<IBroadcaster>().BroadcastToGroupsAsync(
+        ["a", "b", "a"], "changed", except: new DarkWsBroadcastExclusion { ConnectionId = sender.Id });
+    if (sender.SentMessages.Count != 0 || recipient.SentMessages.Count != 1 || testing.Broadcasts.Count != 1)
+        throw new InvalidOperationException("The installed package failed group union or exclusion delivery.");
 }
 services.AddDarkWs(options => options.MaxMessageSizeBytes = 65536)
     .AddHandlersFromAssemblyContaining<PackageHandler>();
@@ -82,4 +88,10 @@ public sealed class ConsumerConnection : IWebSocketConnection {
     public Task SendAsync(byte[] data, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task CloseAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     public void Dispose() { }
+}
+
+public sealed class SmokeGroupSession : IDarkWsSession {
+    public string Id => "smoke";
+    public IReadOnlyCollection<string> Groups => ["a", "b"];
+    public System.Security.Claims.ClaimsPrincipal User { get; } = new();
 }

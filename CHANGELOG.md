@@ -8,6 +8,8 @@ include migration guidance before a release is published.
 
 ### Added
 
+- Group broadcast connection/session exclusions and `BroadcastToGroupsAsync` on
+  `IBroadcaster` and `HandlerBase`, with one publication and deduplicated recipients.
 - `DarkWS.Testing`: direct handler context initialization, captured responses and
   targeted broadcasts, and registered action invocation through the server pipeline
   without sockets. `HandlerBase` no longer depends on the connection dispatcher;
@@ -47,6 +49,12 @@ include migration guidance before a release is published.
 
 ### Migration
 
+- Upgrade all server and Redis packages sharing a channel before using group unions
+  or exclusions. Their Groups=4 envelope adds `groups` and `except`; old nodes reject
+  it. Existing single-target messages are unchanged. Custom `IBroadcaster`
+  implementations must implement the new group-union methods to support them.
+  Use named `except:` and `cancellationToken:` arguments to distinguish exclusions,
+  data, and a `default` cancellation token when selecting overloads.
 - AUD-03: Clients that pipeline many slow requests on one connection can now
   receive `darkws:error:busy`. Retry such requests, or raise
   `MaxConcurrentRequestsPerConnection` or `RequestQueueTimeout`, keeping the

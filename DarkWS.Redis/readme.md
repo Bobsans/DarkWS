@@ -21,10 +21,18 @@ minimum dependency and is also tested against StackExchange.Redis 3.2.1.
 
 The Redis wire envelope uses immutable JSON settings, independent of application
 `DarkWsOptions.JsonOptions`. Fields are `target`, `targetId`, `action`, and `data`.
-Numeric targets are fixed: All=0, Connection=1, Session=2, Group=3. Payload data is
+Numeric targets are fixed: All=0, Connection=1, Session=2, Group=3, Groups=4. Payload data is
 already JSON and preserves the application's serialization choices. Default-format
 older peers remain compatible; coordinate a channel migration for older peers
 that emitted customized envelope names.
+
+Groups=4 adds `groups` and optional `except` with `connectionId` and/or `sessionId`.
+It carries group unions and single-group exclusions in one Redis publication.
+Each server deduplicates local recipients and applies exclusions to its indexed
+membership snapshot. Invalid group selections are rejected during deserialization.
+Upgrade every server and Redis package sharing a channel before using these
+methods: old nodes reject Groups=4 and skip delivery. This prevents old nodes from
+silently ignoring exclusions. Legacy target messages retain their previous format.
 
 Only one Redis subscription can be active. A repeated Subscribe call throws
 `InvalidOperationException`; call Unsubscribe before replacing it. Cancelling the

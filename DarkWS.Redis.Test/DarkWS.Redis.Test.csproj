@@ -12,5 +12,6 @@
   <ItemGroup>
     <ProjectReference Include="..\DarkWS\DarkWS.csproj" />
     <ProjectReference Include="..\DarkWS.Redis\DarkWS.Redis.csproj" />
+    <ProjectReference Include="..\DarkWS.Testing\DarkWS.Testing.csproj" />
   </ItemGroup>
 </Project>

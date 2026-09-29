@@ -81,6 +81,26 @@ public abstract class HandlerBase {
     protected Task BroadcastToGroupAsync<T>(string group, string action, T? data, CancellationToken cancellationToken = default) {
         return Context.Broadcaster.BroadcastToGroupAsync(group, action, data, cancellationToken);
     }
+
+    /// <summary>Publishes to one group with exclusions; use Connection.Id to exclude this handler's connection.</summary>
+    protected Task BroadcastToGroupAsync(string group, string action, DarkWsBroadcastExclusion except, CancellationToken cancellationToken = default) {
+        return Context.Broadcaster.BroadcastToGroupAsync(group, action, except, cancellationToken);
+    }
+
+    /// <summary>Publishes data to one group with explicit connection/session exclusions.</summary>
+    protected Task BroadcastToGroupAsync<T>(string group, string action, T? data, DarkWsBroadcastExclusion except, CancellationToken cancellationToken = default) {
+        return Context.Broadcaster.BroadcastToGroupAsync(group, action, data, except, cancellationToken);
+    }
+
+    /// <summary>Publishes once to a group union, with optional exclusions and no duplicate recipients.</summary>
+    protected Task BroadcastToGroupsAsync(IEnumerable<string> groups, string action, DarkWsBroadcastExclusion? except = null, CancellationToken cancellationToken = default) {
+        return Context.Broadcaster.BroadcastToGroupsAsync(groups, action, except, cancellationToken);
+    }
+
+    /// <summary>Publishes data once to a group union, with optional exclusions and no duplicate recipients.</summary>
+    protected Task BroadcastToGroupsAsync<T>(IEnumerable<string> groups, string action, T? data, DarkWsBroadcastExclusion? except = null, CancellationToken cancellationToken = default) {
+        return Context.Broadcaster.BroadcastToGroupsAsync(groups, action, data, except, cancellationToken);
+    }
 }
 
 /// <summary>Base for per-message handlers. Context-dependent members are available only during action invocation.</summary>

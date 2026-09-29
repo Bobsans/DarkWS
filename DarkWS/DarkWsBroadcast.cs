@@ -16,7 +16,21 @@ public enum DarkWsTarget {
     Session = 2,
 
     /// <summary>Members of a broadcast group.</summary>
-    Group = 3
+    Group = 3,
+
+    /// <summary>The union of several groups, optionally excluding connections or sessions.</summary>
+    Groups = 4
+}
+
+/// <summary>Excludes a connection, every connection in a session, or both from a group broadcast.</summary>
+public sealed class DarkWsBroadcastExclusion {
+    /// <summary>Gets the connection id to exclude, or null.</summary>
+    [JsonPropertyName("connectionId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ConnectionId { get; init; }
+
+    /// <summary>Gets the session id whose connections are excluded, or null.</summary>
+    [JsonPropertyName("sessionId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionId { get; init; }
 }
 
 /// <summary>Backplane message carrying the recipient selector, action name, and optional JSON data.</summary>
@@ -31,7 +45,34 @@ public sealed record DarkWsBroadcast(
     [property: JsonPropertyName("action")] string Action,
     [property: JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(BroadcastDataConverter))]
     JsonElement? Data
-);
+) : IJsonOnDeserialized {
+    /// <summary>Gets the group union for Target Groups. Null for legacy single-target messages.</summary>
+    [JsonPropertyName("groups"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Groups { get; init; }
+
+    /// <summary>Gets optional exclusions for Target Groups.</summary>
+    [JsonPropertyName("except"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DarkWsBroadcastExclusion? Except { get; init; }
+
+    void IJsonOnDeserialized.OnDeserialized() => ValidateGroupSelection();
+
+    internal void ValidateGroupSelection() {
+        if (Target != DarkWsTarget.Groups) {
+            if (Groups is not null || Except is not null) {
+                throw new ArgumentException("Group lists and exclusions require the Groups target.");
+            }
+            return;
+        }
+        if (TargetId is not null || Groups is null || Groups.Any(string.IsNullOrWhiteSpace) || string.IsNullOrWhiteSpace(Action)) {
+            throw new ArgumentException("The Groups target requires a group list with non-empty names and no target id.");
+        }
+        if (Except is not null &&
+            ((Except.ConnectionId is not null && string.IsNullOrWhiteSpace(Except.ConnectionId)) ||
+             (Except.SessionId is not null && string.IsNullOrWhiteSpace(Except.SessionId)))) {
+            throw new ArgumentException("Exclusion ids must be non-empty when provided.");
+        }
+    }
+}
 
 // No data is omitted and JSON null reads back as a Null element, so an explicit null survives a serializing backplane.
 internal sealed class BroadcastDataConverter : JsonConverter<JsonElement?> {

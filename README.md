@@ -40,7 +40,7 @@ detection, while .NET 9/10 use transport PING/PONG timeouts.
 - A new async DI scope for every request.
 - Typed application sessions plus optional ASP.NET `ISession` access.
 - Authentication on connect and re-authentication without reconnecting.
-- Broadcasts to all clients, one connection, one session, or one group.
+- Broadcasts to all clients, one connection, one session, or a group union with exclusions.
 - In-memory single-instance operation with no extra dependency.
 - Optional Redis fan-out for multi-instance deployments.
 - Serialized socket writes, bounded sends, graceful shutdown, and reconnects.
@@ -271,6 +271,30 @@ on its own, call `ConnectionStorage.Add(connection)` to refresh the indexes.
 `Add` ignores a closed connection, so a refresh that races with disconnect cannot
 register it again.
 
+For several groups, publish once with `BroadcastToGroupsAsync`; overlapping members
+receive one notification. Use a named `except` argument to distinguish exclusions
+from the generic data argument:
+
+```csharp
+await broadcaster.BroadcastToGroupsAsync(
+    ["account:42", "editors"], "document:changed", new { DocumentId = 7 },
+    except: new DarkWsBroadcastExclusion { ConnectionId = sourceConnectionId });
+await broadcaster.BroadcastToGroupAsync(
+    "account:42", "document:changed",
+    except: new DarkWsBroadcastExclusion { SessionId = sourceSessionId });
+```
+
+`ConnectionId` skips one tab/connection; `SessionId` skips every connection in that
+session. When both are provided, either match is excluded. The same helpers exist
+on `HandlerBase`; use `Connection.Id` to exclude the calling connection.
+Selection uses one snapshot of indexed group/session membership. Duplicate groups
+are collapsed, unknown groups have no recipients, and an empty group sequence does
+not publish. Null collections and blank group names or exclusion ids are rejected.
+New group-union methods on custom `IBroadcaster` implementations must be implemented;
+their defaults throw `NotSupportedException` rather than silently ignoring exclusions.
+Use `cancellationToken: default` (or a typed token) instead of an untyped positional
+`default` when selecting the existing single-group overloads.
+
 For ASP.NET session state, register `AddSession()` and place `UseSession()`
 before `MapDarkWs()`. WebSockets are long-lived requests, so call
 `HttpContext.Session.CommitAsync()` when a change must be persisted immediately.
@@ -309,10 +333,18 @@ as after a client reconnect, have clients refresh from the source of truth.
 
 The Redis envelope is independent of application `JsonOptions`: its fixed fields
 are `target`, `targetId`, `action`, and `data`, with numeric targets All=0,
-Connection=1, Session=2, Group=3. These values must never be reassigned. Application
+Connection=1, Session=2, Group=3, Groups=4. These values must never be reassigned. Application
 payloads retain their configured JSON representation inside `data`. Default-format
 older peers remain compatible. Coordinate migration or change channels if older
 instances emitted a custom envelope naming policy.
+
+Group unions and all exclusion overloads use Groups=4, a `groups` array, a null
+`targetId`, and optional `except.connectionId` / `except.sessionId`. Even a single
+group with an exclusion uses this new target, so old nodes cannot silently deliver
+it without applying the exclusion. Old nodes reject this target and do not deliver
+the notification. Upgrade **all** server and Redis packages on a shared channel
+before using the new methods, or use a separate channel during rollout. Legacy
+single-target messages and client-facing notification envelopes remain unchanged.
 
 A Redis backplane supports one active subscription. Unsubscribe before replacing
 it; repeated Subscribe calls throw `InvalidOperationException`. Its listener token

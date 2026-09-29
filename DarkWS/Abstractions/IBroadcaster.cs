@@ -25,4 +25,22 @@ public interface IBroadcaster {
 
     /// <summary>Publishes an action and optional data to members of the specified group.</summary>
     Task BroadcastToGroupAsync<T>(string group, string action, T? data, CancellationToken cancellationToken = default);
+
+    /// <summary>Publishes to one group with explicit connection/session exclusions.</summary>
+    Task BroadcastToGroupAsync(string group, string action, DarkWsBroadcastExclusion except, CancellationToken cancellationToken = default) =>
+        BroadcastToGroupsAsync([group], action, except, cancellationToken);
+
+    /// <summary>Publishes data to one group with explicit connection/session exclusions.</summary>
+    Task BroadcastToGroupAsync<T>(string group, string action, T? data, DarkWsBroadcastExclusion except, CancellationToken cancellationToken = default) =>
+        BroadcastToGroupsAsync([group], action, data, except, cancellationToken);
+
+    /// <summary>Publishes once to the union of groups, delivering once per connection. Empty groups are a no-op.</summary>
+    /// <remarks>Custom broadcasters must implement this operation to support group unions and exclusions.</remarks>
+    Task BroadcastToGroupsAsync(IEnumerable<string> groups, string action, DarkWsBroadcastExclusion? except = null, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This broadcaster does not support group unions and exclusions.");
+
+    /// <summary>Publishes data once to the union of groups, delivering once per connection. Empty groups are a no-op.</summary>
+    /// <remarks>Custom broadcasters must implement this operation to support group unions and exclusions.</remarks>
+    Task BroadcastToGroupsAsync<T>(IEnumerable<string> groups, string action, T? data, DarkWsBroadcastExclusion? except = null, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This broadcaster does not support group unions and exclusions.");
 }
