@@ -31,6 +31,21 @@ Requests use `{ id, action, data? }`. The `message` event receives the full flat
 broadcast `{ id: "@", action, data? }`. Update the server and clients together:
 the previous `payload` request field and nested broadcast envelope are incompatible.
 
+Use `onAction` to receive only one exact, case-sensitive broadcast action:
+
+```ts
+const unsubscribe = client.onAction<User>("user:updated", user => {
+  console.log(user);
+});
+unsubscribe();
+```
+
+The callback receives `data` directly, including `undefined` when it is omitted
+and `null` when sent explicitly. The optional type argument describes the expected
+payload; it does not validate incoming data. Subscriptions survive reconnects.
+The returned function removes only that subscription and is safe to call more
+than once. Other subscriptions and the full-envelope `message` event are unchanged.
+
 Requests accept either the existing numeric timeout or a `DarkWsRequestOptions`
 object as the third argument:
 

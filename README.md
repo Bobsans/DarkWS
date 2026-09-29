@@ -415,6 +415,12 @@ client.dispose();
 `dispose()` is terminal: it stops reconnect and ping timers, closes the socket,
 and rejects pending requests.
 
+`client.onAction<TData>(action, callback)` subscribes to one exact broadcast action
+and passes its `data` directly (`undefined` when omitted). It returns an idempotent
+unsubscribe function for that subscription. Other listeners and the full-envelope
+`message` event are unchanged; action subscriptions survive reconnects. The type
+argument describes the expected payload without runtime validation.
+
 Requests also accept `request(action, data, { timeout, retry })`; the existing
 numeric third-argument timeout remains supported. `timeout` is the reply deadline
 per attempt in milliseconds. `retry: { connectionClosed: 2, timeout: 1, jitter: 250 }`

@@ -679,6 +679,46 @@ describe("DarkWs", () => {
     client.dispose();
   });
 
+  it.each([undefined, null, { id: 42 }, 0, false, ""])("onAction delivers only matching broadcast data %j", data => {
+    const client = createClient().connect();
+    const socket = MockWebSocket.instances[0];
+    const listener = vi.fn();
+    client.onAction("client:sync", listener);
+    socket.serverMessage({ id: "@", action: "other", data });
+    socket.serverMessage({ id: "@", action: "Client:Sync", data });
+    socket.serverMessage({ id: "request-id", action: "client:sync", data });
+    expect(listener).not.toHaveBeenCalled();
+    socket.serverMessage({ id: "@", action: "client:sync", ...(data === undefined ? {} : { data }) });
+    expect(listener).toHaveBeenCalledExactlyOnceWith(data);
+    client.dispose();
+  });
+
+  it("keeps onAction subscriptions independent across unsubscribe and reconnect", () => {
+    const client = createClient().connect();
+    const received: number[] = [];
+    const callback = (data: number): void => { received.push(data); };
+    const first = client.onAction("count", callback);
+    const second = client.onAction("count", callback);
+    const messages = vi.fn();
+    client.on("message", messages);
+    first();
+    first();
+    const socket = MockWebSocket.instances[0];
+    socket.serverMessage({ id: "@", action: "count", data: 1 });
+    expect(received).toEqual([1]);
+    socket.serverClose();
+    client.reconnect();
+    const next = MockWebSocket.instances[1];
+    next.serverMessage({ id: "@", action: "count", data: 2 });
+    expect(received).toEqual([1, 2]);
+    second();
+    next.serverMessage({ id: "@", action: "count", data: 3 });
+    expect(received).toEqual([1, 2]);
+    expect(messages).toHaveBeenCalledTimes(3);
+    expect(messages).toHaveBeenLastCalledWith({ id: "@", action: "count", data: 3 }, expect.anything());
+    client.dispose();
+  });
+
   it("waits for beforeConnect before opening a socket", async () => {
     let release!: () => void;
     const beforeConnect = () => new Promise<void>((resolve) => {

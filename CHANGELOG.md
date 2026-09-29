@@ -8,6 +8,9 @@ include migration guidance before a release is published.
 
 ### Added
 
+- Browser client `onAction<TData>(action, callback)` filters one exact broadcast
+  action, passes its data directly, and returns an idempotent unsubscribe function.
+  It reuses the existing message subscriptions and survives reconnects.
 - Browser request options `{ timeout, retry: { connectionClosed, timeout, jitter } }`
   with independent retry budgets and random delay in milliseconds. Retries are
   disabled by default and must only be enabled for idempotent actions. Each attempt

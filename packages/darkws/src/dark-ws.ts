@@ -234,6 +234,14 @@ export default class DarkWs {
     }
   }
 
+  /** Subscribes to one exact broadcast action and returns an unsubscribe function. Omitted data is undefined. */
+  public onAction<TData = unknown>(action: string, callback: (data: TData) => void): () => void {
+    return this.on("message", message => {
+      const response = message as ResponseMessage;
+      if (response.action === action) callback(response.data as TData);
+    });
+  }
+
   public async send<T>(data: T, jsonify = true): Promise<void> {
     const socket = await this.waitForConnection();
     this.assertSocketOpen(socket);
