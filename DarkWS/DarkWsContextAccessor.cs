@@ -5,6 +5,9 @@ using Microsoft.AspNetCore.Http.Features;
 namespace DarkWS;
 
 internal sealed class DarkWsContextAccessor : IDarkWsContextAccessor {
+    internal IServiceProvider Services { get; private set; } = null!;
+    internal IBroadcaster Broadcaster { get; private set; } = null!;
+
     // A snapshot: auth:/logout arriving while an action runs must not change that action's identity.
     public IDarkWsSession? Session {
         get {
@@ -37,10 +40,13 @@ internal sealed class DarkWsContextAccessor : IDarkWsContextAccessor {
         }
     }
 
-    public void Initialize(IWebSocketConnection connection, CancellationToken cancellationToken, IDarkWsSession? session, DarkWsActionInfo? action = null) {
+    public void Initialize(IWebSocketConnection connection, CancellationToken cancellationToken, IDarkWsSession? session,
+        IServiceProvider services, IBroadcaster broadcaster, DarkWsActionInfo? action = null) {
         _connection = connection;
         _session = session;
         _action = action;
         _connectionAborted = cancellationToken;
+        Services = services;
+        Broadcaster = broadcaster;
     }
 }

@@ -21,6 +21,7 @@ backplane.
 | [`DarkWS.Redis`](DarkWS.Redis/) | Redis backplane for multi-instance deployments |
 | [`DarkWS.Client`](DarkWS.Client/) | Async .NET client with typed requests and broadcasts |
 | [`DarkWS.Client.DependencyInjection`](DarkWS.Client.DependencyInjection/) | Optional Microsoft DI registration of `IDarkWsClient` |
+| [`DarkWS.Testing`](DarkWS.Testing/) | Handler unit tests and registered action tests without sockets |
 | [`darkws`](packages/darkws/) | Dependency-free ESM browser client with TypeScript declarations |
 
 The .NET packages target .NET 8, 9, and 10. The browser package targets modern

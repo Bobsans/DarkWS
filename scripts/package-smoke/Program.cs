@@ -3,6 +3,8 @@ using DarkWS;
 using DarkWS.Abstractions;
 using DarkWS.Redis;
 using DarkWS.Client;
+using DarkWS.Testing;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -13,6 +15,19 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 var services = new ServiceCollection();
+await using (var testing = new DarkWsTestHost(darkWs => darkWs.AddHandlersFromAssemblyContaining<PackageHandler>())) {
+    var fake = testing.CreateConnection();
+    await testing.InvokeAsync(fake, "package:echo", JsonSerializer.SerializeToElement("testing"), requestId: "test");
+    using var response = JsonDocument.Parse(fake.SentMessages.Single());
+    if (response.RootElement.GetProperty("data").GetString() != "testing")
+        throw new InvalidOperationException("The installed testing package failed a handler request.");
+    await using var scope = testing.CreateScope(fake);
+    var handler = new PackageHandler();
+    scope.Initialize(handler);
+    await handler.Echo("direct").WriteResultAsync(new ResponseContext(fake, "direct", new DarkWsOptions()));
+    if (fake.SentMessages.Count != 2)
+        throw new InvalidOperationException("The installed testing package failed direct handler initialization.");
+}
 services.AddDarkWs(options => options.MaxMessageSizeBytes = 65536)
     .AddHandlersFromAssemblyContaining<PackageHandler>();
 services.Configure<DarkWsOptions>(options => options.MaxMessageSizeBytes = 777);

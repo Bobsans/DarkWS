@@ -139,7 +139,7 @@ internal sealed class WebSocketHandler(
         }
     }
 
-    private async Task<InputMessage?> ReadMessageAsync(
+    internal async Task<InputMessage?> ReadMessageAsync(
         byte[] bytes,
         IWebSocketConnection connection,
         CancellationToken cancellationToken
@@ -164,7 +164,7 @@ internal sealed class WebSocketHandler(
         }
     }
 
-    private async Task ProcessMessageAsync(InputMessage message, IWebSocketConnection connection, CancellationToken cancellationToken) {
+    internal async Task ProcessMessageAsync(InputMessage message, IWebSocketConnection connection, CancellationToken cancellationToken) {
         var response = new ResponseContext(connection, message.Id, _options);
         try {
             try {
@@ -214,7 +214,7 @@ internal sealed class WebSocketHandler(
             }
 
             var context = services.GetRequiredService<DarkWsContextAccessor>();
-            context.Initialize(connection, cancellationToken, session, action.Action);
+            context.Initialize(connection, cancellationToken, session, services, Broadcaster, action.Action);
 
             foreach (var initializer in services.GetServices<IDarkWsScopeInitializer>()) {
                 await initializer.InitializeAsync(services, context, cancellationToken);
@@ -224,7 +224,7 @@ internal sealed class WebSocketHandler(
 
             async ValueTask<IResponse> InvokeHandlerAsync() {
                 var handler = (HandlerBase)services.GetRequiredService(action.HandlerType);
-                handler.Initialize(this, context, services);
+                handler.Initialize(context);
                 return await action.InvokeAsync(handler, parameter)
                     ?? throw new InvalidOperationException($"Action {message.Action} returned no response");
             }
@@ -359,12 +359,12 @@ internal sealed class WebSocketHandler(
         }
     }
 
-    private static DarkWsContextAccessor CreateContext(
+    private DarkWsContextAccessor CreateContext(
         IWebSocketConnection connection,
         CancellationToken cancellationToken
     ) {
         var context = new DarkWsContextAccessor();
-        context.Initialize(connection, cancellationToken, connection.Session);
+        context.Initialize(connection, cancellationToken, connection.Session, connection.HttpContext.RequestServices, Broadcaster);
         return context;
     }
 

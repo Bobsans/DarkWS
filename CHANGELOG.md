@@ -8,6 +8,10 @@ include migration guidance before a release is published.
 
 ### Added
 
+- `DarkWS.Testing`: direct handler context initialization, captured responses and
+  targeted broadcasts, and registered action invocation through the server pipeline
+  without sockets. `HandlerBase` no longer depends on the connection dispatcher;
+  existing core public interfaces are unchanged.
 - AUD-03: `DarkWsOptions.RequestQueueTimeout` (default 5 seconds) and
   `DarkWsOptions.BusyError` (default `darkws:error:busy`).
 - AUD-04: Browser client option `authenticationToken`. It runs when each socket

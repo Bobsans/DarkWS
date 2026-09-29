@@ -12,5 +12,6 @@
     <PackageReference Include="DarkWS" Version="$(DarkWsSmokeVersion)" />
     <PackageReference Include="DarkWS.Redis" Version="$(DarkWsSmokeVersion)" />
     <PackageReference Include="DarkWS.Client.DependencyInjection" Version="$(DarkWsSmokeVersion)" />
+    <PackageReference Include="DarkWS.Testing" Version="$(DarkWsSmokeVersion)" />
   </ItemGroup>
 </Project>

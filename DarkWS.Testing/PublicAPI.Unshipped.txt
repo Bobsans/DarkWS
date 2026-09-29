@@ -1,0 +1,26 @@
+#nullable enable
+DarkWS.Testing.DarkWsTestConnection
+DarkWS.Testing.DarkWsTestConnection.Abort() -> void
+DarkWS.Testing.DarkWsTestConnection.CloseAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Testing.DarkWsTestConnection.DarkWsTestConnection(DarkWS.Abstractions.IDarkWsSession? session = null, Microsoft.AspNetCore.Http.HttpContext? httpContext = null) -> void
+DarkWS.Testing.DarkWsTestConnection.Dispose() -> void
+DarkWS.Testing.DarkWsTestConnection.HttpContext.get -> Microsoft.AspNetCore.Http.HttpContext!
+DarkWS.Testing.DarkWsTestConnection.Id.get -> string!
+DarkWS.Testing.DarkWsTestConnection.IsOpen.get -> bool
+DarkWS.Testing.DarkWsTestConnection.ReceiveMessageAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<DarkWS.ReceivedMessage!>!
+DarkWS.Testing.DarkWsTestConnection.SendAsync(byte[]! data, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Testing.DarkWsTestConnection.SentMessages.get -> System.Collections.Generic.IReadOnlyList<byte[]!>!
+DarkWS.Testing.DarkWsTestConnection.Session.get -> DarkWS.Abstractions.IDarkWsSession?
+DarkWS.Testing.DarkWsTestConnection.WebSocket.get -> System.Net.WebSockets.WebSocket!
+DarkWS.Testing.DarkWsTestHost
+DarkWS.Testing.DarkWsTestHost.Broadcasts.get -> System.Collections.Generic.IReadOnlyList<DarkWS.DarkWsBroadcast!>!
+DarkWS.Testing.DarkWsTestHost.CreateConnection(DarkWS.Abstractions.IDarkWsSession? session = null, Microsoft.AspNetCore.Http.HttpContext? httpContext = null) -> DarkWS.Testing.DarkWsTestConnection!
+DarkWS.Testing.DarkWsTestHost.CreateScope(DarkWS.Testing.DarkWsTestConnection! connection, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> DarkWS.Testing.DarkWsTestScope!
+DarkWS.Testing.DarkWsTestHost.DarkWsTestHost(System.Action<DarkWS.DarkWsBuilder!>! configure, System.Action<DarkWS.DarkWsOptions!>? configureOptions = null) -> void
+DarkWS.Testing.DarkWsTestHost.DisposeAsync() -> System.Threading.Tasks.ValueTask
+DarkWS.Testing.DarkWsTestHost.InvokeAsync(DarkWS.Testing.DarkWsTestConnection! connection, string! action, System.Text.Json.JsonElement? data = null, string? requestId = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+DarkWS.Testing.DarkWsTestHost.Services.get -> System.IServiceProvider!
+DarkWS.Testing.DarkWsTestScope
+DarkWS.Testing.DarkWsTestScope.DisposeAsync() -> System.Threading.Tasks.ValueTask
+DarkWS.Testing.DarkWsTestScope.Initialize(DarkWS.HandlerBase! handler) -> void
+DarkWS.Testing.DarkWsTestScope.Services.get -> System.IServiceProvider!

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Title>DarkWS.Testing</Title>
+    <Description>Transportless handler testing for DarkWS</Description>
+    <PackageTags>websocket;aspnetcore;testing;realtime</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DarkWS\DarkWS.csproj" />
+  </ItemGroup>
+</Project>
