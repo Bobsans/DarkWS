@@ -243,7 +243,7 @@ clean and use `authenticationToken`. After logout, clear whatever source `query`
 | --- | --- |
 | `connect()` | Opens a socket; keeps an open or opening one |
 | `reconnect()` | Resets backoff and connects if no socket is open |
-| `close(code = 1000)` | Closes and stops reconnecting; `code` must be 1000 or 3000–4999 |
+| `close(code = 1000)` | Immediately rejects pending calls, closes, and stops reconnecting; `code` must be 1000 or 3000–4999 |
 | `dispose()` | Terminal: stops timers, closes the socket, rejects pending requests |
 | `send(data, jsonify = true)` | Sends raw data without waiting for a reply |
 
@@ -257,6 +257,11 @@ State getters: `connected`, `closing`, `closed`, `pendingRequestCount`.
 - To replace an open socket, call `close()` and then `connect()`.
 - `reconnectOnVisible: true` retries a pending reconnect as soon as the tab becomes
   visible instead of waiting out the backoff.
+
+`close()` rejects requests and queued authentication/logout commands with
+`ConnectionClosedError` before the native closing handshake finishes. The `sent`
+flag still reports whether a request was sent; retries stop even if you reconnect
+immediately. The native `close` event can arrive later.
 
 ### Heartbeat
 
@@ -274,6 +279,12 @@ connections open.
   A rejection schedules a reconnect.
 
 ## Options
+
+Omitted options and explicit `undefined` use the same defaults. Timer values must
+be finite and between 0 and 2147483647 ms; `pingInterval` (or `pingTimeout`) must be
+greater than 0. Zero disables the request, control, and PONG deadlines;
+`reconnect: false` disables automatic reconnect. Zero connection-wait and reconnect
+delays mean an immediate deadline or retry, respectively.
 
 | Option | Default | Meaning |
 | --- | --- | --- |

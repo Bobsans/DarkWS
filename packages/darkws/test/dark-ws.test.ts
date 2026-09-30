@@ -92,6 +92,106 @@ describe("DarkWs", () => {
     vi.useRealTimers();
   });
 
+  it.each([{}, { requestTimeout: undefined }])("keeps the default request deadline with %j", async options => {
+    const client = createClient({ ...options, pingInterval: 600000 }).connect();
+    MockWebSocket.instances[0].open();
+    const rejected = expect(client.request("silent")).rejects.toBeInstanceOf(RequestTimeoutError);
+    await vi.advanceTimersByTimeAsync(299999);
+    expect(client.pendingRequestCount).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+    expect(client.pendingRequestCount).toBe(0);
+    client.dispose();
+  });
+
+  it.each([{}, { waitConnectionTimeout: undefined }])("keeps the default connection wait with %j", async options => {
+    const client = createClient(options);
+    const rejected = expect(client.request("waiting")).rejects.toBeInstanceOf(ConnectionClosedError);
+    await vi.advanceTimersByTimeAsync(29999);
+    expect(client.pendingRequestCount).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+    client.dispose();
+  });
+
+  it.each([{}, { pongTimeout: undefined, reconnect: undefined, reconnectTimeout: undefined, pingInterval: undefined, pingTimeout: undefined }])(
+    "keeps default heartbeat and reconnect settings with %j", async options => {
+      vi.spyOn(Math, "random").mockReturnValue(0);
+      const client = new DarkWs({ host: "example.test", path: "/ws", secure: false, ...options }).connect();
+      const socket = MockWebSocket.instances[0];
+      socket.open();
+      await vi.advanceTimersByTimeAsync(29999);
+      expect(socket.sent).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(socket.sent).toEqual(["ping"]);
+      await vi.advanceTimersByTimeAsync(29999);
+      expect(socket.readyState).toBe(MockWebSocket.OPEN);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(socket.readyState).toBe(MockWebSocket.CLOSED);
+      await vi.advanceTimersByTimeAsync(2499);
+      expect(MockWebSocket.instances).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(MockWebSocket.instances).toHaveLength(2);
+      client.dispose();
+    });
+
+  it("preserves zero deadlines and disabled reconnect", async () => {
+    const client = createClient({ requestTimeout: 0, pongTimeout: 0, reconnect: false, pingInterval: 100000 }).connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    const rejected = expect(client.request("silent")).rejects.toMatchObject({ name: "ConnectionClosedError", sent: true });
+    await vi.advanceTimersByTimeAsync(300001);
+    expect(client.pendingRequestCount).toBe(1);
+    expect(socket.readyState).toBe(MockWebSocket.OPEN);
+    socket.serverClose();
+    await rejected;
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    client.dispose();
+  });
+
+  it.each([{ requestTimeout: -1 }, { controlTimeout: NaN }, { pongTimeout: Infinity },
+    { waitConnectionTimeout: 2147483648 }, { reconnectTimeout: -1 }, { pingInterval: 0 },
+    { pingInterval: Infinity }, { pingTimeout: -1 },
+  ])("rejects invalid timer options before allocating resources: %j", options => {
+    expect(() => createClient(options)).toThrow(RangeError);
+    expect(MockWebSocket.instances).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("rejects pending calls before a delayed native close and preserves sent flags", async () => {
+    const client = createClient({ maxPendingRequests: 4, requestTimeout: 0, controlTimeout: 0 }).connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    vi.spyOn(socket, "close").mockImplementation(() => { socket.readyState = MockWebSocket.CLOSING; });
+    const sent = client.request("sent", undefined, { retry: { connectionClosed: 2 } });
+    const auth = client.authenticate("token");
+    const queued = client.logout();
+    await vi.advanceTimersByTimeAsync(0);
+    const unsent = client.request("unsent");
+    const results = Promise.allSettled([sent, auth, queued, unsent]);
+    client.close();
+    expect(client.closing).toBe(true);
+    expect(await results).toMatchObject([true, true, false, false].map(sent => ({
+      status: "rejected", reason: { name: "ConnectionClosedError", sent },
+    })));
+    expect(client.pendingRequestCount).toBe(0);
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+
+    client.connect();
+    const next = MockWebSocket.instances[1];
+    next.open();
+    const result = client.request("next");
+    await vi.advanceTimersByTimeAsync(0);
+    socket.serverClose();
+    expect(client.pendingRequestCount).toBe(1);
+    next.serverMessage({ id: JSON.parse(next.sent[0] as string).id, data: 42 });
+    await expect(result).resolves.toBe(42);
+    client.dispose();
+  });
+
   describe("pending request limit", () => {
     it("rejects request 257 immediately without adding requests, hooks, or timers", async () => {
       const requestOptions = vi.fn(() => undefined);

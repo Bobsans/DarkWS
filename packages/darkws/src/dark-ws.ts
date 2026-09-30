@@ -159,13 +159,14 @@ export default class DarkWs {
 
   constructor(options: DarkWsOptions) {
     this.options = {
-      reconnect: true,
-      reconnectTimeout: 5000,
-      requestTimeout: 300000,
-      pongTimeout: 30000,
-      waitConnectionTimeout: 30000,
-      debug: false,
       ...options,
+      reconnect: options.reconnect ?? true,
+      reconnectTimeout: options.reconnectTimeout ?? 5000,
+      reconnectOnVisible: options.reconnectOnVisible ?? false,
+      requestTimeout: options.requestTimeout ?? 300000,
+      pongTimeout: options.pongTimeout ?? 30000,
+      waitConnectionTimeout: options.waitConnectionTimeout ?? 30000,
+      debug: options.debug ?? false,
       controlTimeout: options.controlTimeout ?? 30000,
       maxPendingRequests: options.maxPendingRequests ?? 256,
     };
@@ -173,6 +174,15 @@ export default class DarkWs {
       throw new RangeError("maxPendingRequests must be a positive safe integer");
     }
     this.pingInterval = options.pingInterval ?? options.pingTimeout ?? 30000;
+    for (const key of ["reconnectTimeout", "requestTimeout", "controlTimeout", "pongTimeout", "waitConnectionTimeout"] as const) {
+      const value = this.options[key];
+      if (!Number.isFinite(value) || value < 0 || value > 2147483647) {
+        throw new RangeError(`${key} must be between 0 and 2147483647 ms`);
+      }
+    }
+    if (!Number.isFinite(this.pingInterval) || this.pingInterval <= 0 || this.pingInterval > 2147483647) {
+      throw new RangeError("pingInterval must be greater than 0 and at most 2147483647 ms");
+    }
     if (options.reconnectOnVisible && typeof document !== "undefined") {
       this.visibilityDocument = document;
       this.visibilityDocument.addEventListener("visibilitychange", this.onVisibilityChange);
@@ -386,6 +396,7 @@ export default class DarkWs {
     this.clearReconnectTimer();
     this.clearPingTimer();
     this.rejectConnectionWaiters(new ConnectionClosedError("WebSocket connection was closed by the client"));
+    this.rejectAll(new ConnectionClosedError("WebSocket connection was closed by the client"));
     if (!this.socket || this.socket.readyState === WebSocket.CLOSED) {
       return;
     }
@@ -484,6 +495,7 @@ export default class DarkWs {
       if (socket !== this.socket || socket.readyState !== WebSocket.OPEN) return;
       const failure = error instanceof Error ? error : new Error(String(error));
       this.rejectConnectionWaiters(failure);
+      this.rejectAll(failure);
       this.emit("sessionRestoreFailed", failure, event);
     }
     if (socket === this.socket && socket.readyState === WebSocket.OPEN) this.markReady(socket, event);
@@ -620,10 +632,10 @@ export default class DarkWs {
     }
   }
 
-  private rejectAll(error: ConnectionClosedError): void {
+  private rejectAll(error: Error): void {
     for (const [id, resolver] of this.requests) {
       this.clearResolver(id, resolver);
-      resolver.reject(new ConnectionClosedError(error.message, resolver.sent));
+      resolver.reject(error instanceof ConnectionClosedError ? new ConnectionClosedError(error.message, resolver.sent) : error);
     }
   }
 
