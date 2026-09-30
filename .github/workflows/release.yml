@@ -137,4 +137,5 @@ jobs:
               exit 0
           }
           # Publishing the verified tarball runs no package scripts and rebuilds nothing.
-          npm publish "artifacts/darkws-$env:PACKAGE_VERSION.tgz" --tag $env:NPM_TAG
+          # The ./ prefix keeps npm from reading "artifacts/..." as a GitHub owner/repo spec.
+          npm publish "./artifacts/darkws-$env:PACKAGE_VERSION.tgz" --tag $env:NPM_TAG
