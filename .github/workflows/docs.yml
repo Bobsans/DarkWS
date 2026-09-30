@@ -39,6 +39,9 @@ jobs:
       - name: Install site dependencies
         run: npm ci --prefix website
 
+      - name: Audit site dependencies
+        run: npm audit --prefix website
+
       - name: Generate .NET API reference
         shell: pwsh
         run: ./scripts/docs-api.ps1

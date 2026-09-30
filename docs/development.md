@@ -89,6 +89,31 @@ The Docusaurus site in `website/` is built and deployed to GitHub Pages by
 commands, translations, and versioning. Pages exist in English (`website/docs`) and
 Russian (`website/i18n/ru/...`); update both when behavior changes.
 
+### Website dependency checks
+
+Run `npm ci --prefix website`, `npm audit --prefix website`,
+`pwsh ./scripts/docs-api.ps1`, and `npm run build --prefix website` after changing
+the website lockfile. The build generates the TypeDoc reference and both locales.
+
+The website overrides `serialize-javascript` to 7.0.5 for the CommonJS consumers
+`copy-webpack-plugin` and `css-minimizer-webpack-plugin`. Its Node >=20 requirement
+matches Docusaurus 3.10.2 and the site's engine; CI uses Node 24. This fixes
+[GHSA-5c6j-r48x-rmvq](https://github.com/advisories/GHSA-5c6j-r48x-rmvq) and
+[GHSA-qj8w-gfj5-8c6v](https://github.com/advisories/GHSA-qj8w-gfj5-8c6v).
+
+SockJS uses only `require('uuid').v4()` without a buffer, so its current call site
+does not trigger the v3/v5/v6 buffer issue in
+[GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq).
+The scoped override to uuid 11.1.1 retains its CommonJS export and also removes
+that vulnerable version from the lockfile. Recheck the overrides when Docusaurus
+updates its dependency ranges.
+
+The 30 September 2026 audit's 21 affected dependency nodes were propagated from
+two leaf packages and three advisories. These are conditional website build-tool
+risks, not 21 separate DarkWS server vulnerabilities; the runtime SDK has no npm
+dependencies. Keep Docusaurus 3.10.2 rather than applying the unrelated downgrade
+suggested by `npm audit fix --force`.
+
 The performance page quotes a benchmark run and the current test counts and coverage;
 refresh them from `benchmarks/results/` and the coverage gate output before a release.
 
