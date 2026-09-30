@@ -242,6 +242,48 @@ describe("DarkWs", () => {
     client.dispose();
   });
 
+  it.each([null, 42, {}, { toString: null, valueOf: null }])("rejects invalid response error %j and releases capacity", async error => {
+    const client = createClient({ maxPendingRequests: 1, requestTimeout: 10 }).connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    const rejected = expect(client.request("invalid-error")).rejects.toBeInstanceOf(TypeError);
+    await vi.advanceTimersByTimeAsync(0);
+    const id = JSON.parse(socket.sent[0] as string).id;
+    socket.serverMessage({ id, error });
+    await rejected;
+    expect(client.pendingRequestCount).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
+    socket.serverMessage({ id, data: "late" });
+
+    const timedOut = expect(client.request("next")).rejects.toBeInstanceOf(RequestTimeoutError);
+    await vi.advanceTimersByTimeAsync(10);
+    await timedOut;
+    const disposed = expect(client.request("last")).rejects.toBeInstanceOf(ConnectionClosedError);
+    client.dispose();
+    await disposed;
+    expect(client.pendingRequestCount).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([null, [], 42, {}, { id: 1 }, { id: "@" }, { id: "@", action: 42 },
+    { id: "@", action: "" }, { id: "@", action: "tick", error: null },
+    { id: "@", action: "tick", error: "denied" },
+  ])("ignores invalid envelopes without disturbing pending requests: %j", async envelope => {
+    const client = createClient().connect();
+    const socket = MockWebSocket.instances[0];
+    const listener = vi.fn();
+    client.on("message", listener);
+    socket.open();
+    const result = client.request("read");
+    await vi.advanceTimersByTimeAsync(0);
+    socket.serverMessage(envelope);
+    expect(listener).not.toHaveBeenCalled();
+    expect(client.pendingRequestCount).toBe(1);
+    socket.serverMessage({ id: JSON.parse(socket.sent[0] as string).id, data: null });
+    await expect(result).resolves.toBeNull();
+    client.dispose();
+  });
+
   it("does not open after an intentional close during beforeConnect", async () => {
     let finish!: () => void;
     const client = createClient({ beforeConnect: () => new Promise<void>(resolve => { finish = resolve; }) }).connect();

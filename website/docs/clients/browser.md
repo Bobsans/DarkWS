@@ -55,7 +55,11 @@ try {
 }
 ```
 
-A response counts as an error whenever it has an `error` field, even an empty one.
+A response counts as an error whenever it has a string `error` field, even an empty
+string. A correlated response with a non-string `error` rejects with `TypeError`
+and releases its request slot. Invalid envelopes and broadcasts are ignored;
+broadcasts require a non-empty string `action` and no `error`. The SDK does not
+validate the application-specific shape of `data`.
 
 ### Timeouts
 

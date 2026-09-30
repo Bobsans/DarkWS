@@ -581,8 +581,15 @@ export default class DarkWs {
       return;
     }
     try {
-      const response = JSON.parse(String(event.data)) as ResponseMessage;
+      const response: unknown = JSON.parse(String(event.data));
+      if (response === null || typeof response !== "object" || Array.isArray(response) ||
+          !("id" in response) || typeof response.id !== "string") {
+        throw new TypeError("Response must be an object with a string id");
+      }
       if (response.id === "@") {
+        if (!("action" in response) || typeof response.action !== "string" || response.action === "" || "error" in response) {
+          throw new TypeError("Broadcast must have a non-empty string action and no error");
+        }
         this.emit("message", response, event);
         return;
       }
@@ -590,12 +597,15 @@ export default class DarkWs {
       if (!resolver || resolver.control) {
         return;
       }
+      const data = "data" in response ? response.data : undefined;
+      const error = "error" in response
+        ? typeof response.error === "string"
+          ? new ErrorResponse(response.error, data, resolver.request)
+          : new TypeError("Response error must be a string")
+        : undefined;
       this.clearResolver(response.id, resolver);
-      if ("error" in response) {
-        resolver.reject(new ErrorResponse(response.error ?? "", response.data, resolver.request));
-      } else {
-        resolver.resolve(response.data);
-      }
+      if (error) resolver.reject(error);
+      else resolver.resolve(data);
     } catch (error) {
       this.debug("Invalid message", error);
     }
