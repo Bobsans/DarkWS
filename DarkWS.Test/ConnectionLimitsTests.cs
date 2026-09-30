@@ -39,11 +39,11 @@ public sealed class ConnectionLimitsTests {
         await using var provider = services.BuildServiceProvider();
         provider.GetRequiredService<DarkWsActionRegistry>().Add(typeof(SlowHandler));
         var probe = provider.GetRequiredService<RequestProbe>();
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var sockets = new[] { new TestWebSocket(), new TestWebSocket() };
         var accepts = new List<Task>();
         foreach (var socket in sockets) {
-            for (var id = 0; id < 500; id++) {
+            for (var id = 0; id < limit; id++) {
                 socket.EnqueueReceive($$"""{"id":"{{id}}","action":"limits:slow"}""");
             }
 
@@ -53,8 +53,13 @@ public sealed class ConnectionLimitsTests {
 
         try {
             await UntilAsync(() => probe.Started == limit * 2);
-            // Each socket reads its running requests, as many queued ones, and one waiting for a free place.
-            await UntilAsync(() => sockets.All(socket => socket.ReceiveCount == 2 * limit + 1));
+            foreach (var socket in sockets) {
+                for (var id = limit; id <= 2 * limit; id++) {
+                    socket.EnqueueReceive($$"""{"id":"{{id}}","action":"limits:slow"}""");
+                }
+            }
+            // Admission can wait for a queue place while the transport already waits for the next frame.
+            await UntilAsync(() => sockets.All(socket => socket.ReceiveCount == 2 * limit + 2));
             Assert.That(probe.Started, Is.EqualTo(limit * 2));
         } finally {
             if (cancel) {
@@ -63,9 +68,17 @@ public sealed class ConnectionLimitsTests {
 
             probe.Release.TrySetResult();
             if (!cancel) {
-                while (sockets.Any(socket => socket.Sent.Count < 500)) {
-                    await Task.Delay(10, cancellation.Token);
-                }
+                await Task.WhenAll(sockets.Select(async socket => {
+                    await UntilAsync(() => socket.Sent.Count == 2 * limit + 1);
+                    // Pace subsequent batches; a peer flooding the intake is tested separately below.
+                    for (var first = 2 * limit + 1; first < 500; first += limit) {
+                        var end = Math.Min(500, first + limit);
+                        for (var id = first; id < end; id++) {
+                            socket.EnqueueReceive($$"""{"id":"{{id}}","action":"limits:slow"}""");
+                        }
+                        await UntilAsync(() => socket.Sent.Count == end);
+                    }
+                }));
 
                 foreach (var socket in sockets) {
                     socket.EnqueueClose();
@@ -143,6 +156,66 @@ public sealed class ConnectionLimitsTests {
         await UntilAsync(() => socket.Sent.Count == 3);
         socket.EnqueueClose();
         await accept.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task FullOrdinaryQueueKeepsReadingPingAndPeerClose(bool blockBusyWrite) {
+        await using var provider = CreateProvider(options => {
+            options.MaxConcurrentRequestsPerConnection = 1;
+            options.RequestQueueTimeout = blockBusyWrite ? TimeSpan.FromMilliseconds(50) : TimeSpan.FromSeconds(5);
+            options.ShutdownTimeout = TimeSpan.FromMilliseconds(100);
+        });
+        var probe = provider.GetRequiredService<RequestProbe>();
+        var socket = new TestWebSocket();
+        var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(new WebSocketConnection(socket, new DefaultHttpContext { RequestServices = provider }, null));
+        socket.EnqueueReceive("""{"id":"1","action":"limits:slow"}""");
+        await UntilAsync(() => probe.Started == 1);
+        socket.EnqueueReceive("""{"id":"2","action":"limits:slow"}""");
+        await UntilAsync(() => socket.ReceiveCount == 3);
+        if (blockBusyWrite) {
+            socket.SendBarrier = new TaskCompletionSource().Task;
+        }
+        socket.EnqueueReceive("""{"id":"3","action":"limits:slow"}""");
+        await UntilAsync(() => socket.ReceiveCount == 4);
+        if (blockBusyWrite) {
+            await socket.SendStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        }
+        socket.EnqueueReceive("ping");
+        await UntilAsync(() => socket.ReceiveCount == 5, 1000);
+        if (!blockBusyWrite) {
+            await UntilAsync(() => socket.Sent.Any(bytes => Encoding.UTF8.GetString(bytes) == "pong"), 1000);
+        }
+        socket.EnqueueClose();
+        await accept.WaitAsync(TimeSpan.FromSeconds(2));
+        await UntilAsync(() => socket.WasDisposed);
+        Assert.That(probe.Active, Is.Zero);
+        Assert.That(provider.GetRequiredService<ConnectionStorage>().GetAll(), Is.Empty);
+    }
+
+    [Test]
+    public async Task AdmissionFloodClosesWithBoundedWork() {
+        await using var provider = CreateProvider(options => {
+            options.MaxConcurrentRequestsPerConnection = 1;
+            options.RequestQueueTimeout = TimeSpan.FromSeconds(5);
+        });
+        var probe = provider.GetRequiredService<RequestProbe>();
+        var socket = new TestWebSocket();
+        var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(new WebSocketConnection(socket, new DefaultHttpContext { RequestServices = provider }, null));
+        socket.EnqueueReceive("""{"id":"1","action":"limits:slow"}""");
+        await UntilAsync(() => probe.Started == 1);
+        socket.EnqueueReceive("""{"id":"2","action":"limits:slow"}""");
+        await UntilAsync(() => socket.ReceiveCount == 3);
+        socket.EnqueueReceive("""{"id":"3","action":"limits:slow"}""");
+        await UntilAsync(() => socket.ReceiveCount == 4);
+        for (var id = 4; id < 30; id++) {
+            socket.EnqueueReceive($$"""{"id":"{{id}}","action":"limits:slow"}""");
+        }
+        await accept.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.That(socket.LastOutputCloseStatus, Is.EqualTo(WebSocketCloseStatus.PolicyViolation));
+        Assert.That(socket.ReceiveCount, Is.LessThanOrEqualTo(10));
+        Assert.That(probe.Peak, Is.EqualTo(1));
+        Assert.That(provider.GetRequiredService<ConnectionStorage>().GetAll(), Is.Empty);
     }
 
     [Test]
@@ -250,6 +323,10 @@ public sealed class ConnectionLimitsTests {
                 socket.CloseBarrier = new TaskCompletionSource().Task;
             }
             socket.EnqueueReceive(command);
+            if (!blockClose) {
+                await UntilAsync(() => socket.LastOutputCloseStatus == WebSocketCloseStatus.PolicyViolation);
+                socket.EnqueueClose();
+            }
             await accept.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.That(socket.LastOutputCloseStatus, Is.EqualTo(blockClose ? null : (WebSocketCloseStatus?)WebSocketCloseStatus.PolicyViolation));
             Assert.That(socket.WasAborted, Is.EqualTo(blockClose));
@@ -299,22 +376,25 @@ public sealed class ConnectionLimitsTests {
         }
     }
 
-    [TestCase(null)]
-    [TestCase("logout")]
-    [TestCase("auth:token")]
-    public async Task SaturatedConnectionSurvivesTransportKeepAlive(string? command) {
+    [TestCase(null, 100)]
+    [TestCase("logout", 100)]
+    [TestCase("auth:token", 100)]
+    [TestCase(null, 5000)]
+    [TestCase("logout", 5000)]
+    [TestCase("auth:token", 5000)]
+    public async Task SaturatedConnectionSurvivesTransportKeepAlive(string? command, int queueTimeout) {
         using var host = await new HostBuilder().ConfigureWebHost(builder => builder
             .UseKestrel(options => options.Listen(IPAddress.Loopback, 0))
             .ConfigureServices(services => {
                 services.AddRouting();
                 services.AddSingleton<RequestProbe>();
                 services.AddScoped<SlowHandler>();
-                // On .NET 9+ an unprocessed keep-alive PONG aborts after 600 ms, inside the 1.5 s saturation.
+                // The long admission timeout exceeds both the PONG deadline and the saturation window.
                 services.AddDarkWs(options => {
                     options.MaxConcurrentRequestsPerConnection = 1;
-                    options.RequestQueueTimeout = TimeSpan.FromMilliseconds(100);
-                    options.KeepAliveInterval = TimeSpan.FromMilliseconds(200);
-                    options.KeepAliveTimeout = TimeSpan.FromMilliseconds(400);
+                    options.RequestQueueTimeout = TimeSpan.FromMilliseconds(queueTimeout);
+                    options.KeepAliveInterval = TimeSpan.FromMilliseconds(100);
+                    options.KeepAliveTimeout = TimeSpan.FromMilliseconds(200);
                 });
             })
             .Configure(app => {
@@ -340,7 +420,9 @@ public sealed class ConnectionLimitsTests {
             replies.Add(Encoding.UTF8.GetString(await socket.ReceiveRawMessage()));
         }
 
-        var expected = new List<string> { "{\"id\":\"3\",\"error\":\"darkws:error:busy\"}", "{\"id\":\"1\"}", "{\"id\":\"2\"}" };
+        var expected = queueTimeout == 100
+            ? new List<string> { "{\"id\":\"3\",\"error\":\"darkws:error:busy\"}", "{\"id\":\"1\"}", "{\"id\":\"2\"}" }
+            : ["{\"id\":\"1\"}", "{\"id\":\"2\"}", "{\"id\":\"3\"}"];
         if (command is not null) {
             expected.Add(command == "logout" ? "logout:success" : "auth:failed");
         }

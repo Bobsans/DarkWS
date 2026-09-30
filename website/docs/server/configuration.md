@@ -67,17 +67,21 @@ Each connection has its own queue:
 - As many more ordinary requests wait in FIFO order.
 - Four extra places are reserved for `auth:` and `logout`, which keep their order
   relative to requests.
-- Text `ping` and transport PONGs are handled immediately, so heartbeats keep working
-  under load.
+- A separate intake holds at most `MaxConcurrentRequestsPerConnection + 4` messages
+  while one admission worker waits for dispatcher space. It preserves request and
+  command arrival order.
+- Transport PONGs keep being read under load. Text `ping` replies use a separate
+  worker with one pending ping slot; repeated pings are coalesced while a write is busy.
 
-When the queue is full, reading pauses. A request that waits longer than
-`RequestQueueTimeout` is answered with `darkws:error:busy` and reading continues.
-A command that arrives at a full shared queue closes the connection with status
-**1008** (Policy Violation).
+An ordinary request waiting for dispatcher space longer than `RequestQueueTimeout`
+is answered with `darkws:error:busy`. Socket reads continue during that wait and
+during reply writes. A full intake, or a command admitted to a full dispatcher
+queue, closes the connection with status **1008** (Policy Violation).
 
-Keep `RequestQueueTimeout` below `KeepAliveTimeout` and the clients' pong timeouts.
-When sizing limits, budget memory for running requests plus queued messages, each up
-to `MaxMessageSizeBytes`, times the expected number of connections.
+Clients should limit in-flight work and pace batches by replies to avoid overflowing
+the intake. `RequestQueueTimeout` need not be shorter than `KeepAliveTimeout`.
+Budget for running requests, both bounded queues, one message being admitted, and
+one being received, with each message up to `MaxMessageSizeBytes`, per connection.
 
 DarkWS bounds work inside one connection only. Enforce the total number of
 connections and per-user or per-IP limits in the host or reverse proxy.
@@ -91,7 +95,7 @@ DarkWS detects dead peers differently per runtime:
 - **.NET 8**: every pending socket read is bounded by `ReceiveIdleTimeout`, reset by
   each received fragment. Idle clients must send application traffic within that
   time. The DarkWS clients send text `ping` every 30 seconds by default. Transport
-  PONGs do not count. The timer is paused while a full queue pauses reads.
+  PONGs do not count. Admission waits do not pause the receive timer.
 
 Both clients also detect dead servers with their own ping/pong timeout.
 

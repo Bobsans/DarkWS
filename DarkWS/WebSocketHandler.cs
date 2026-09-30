@@ -39,6 +39,8 @@ internal sealed class WebSocketHandler(
         CancellationTokenSource? requests = null;
         SemaphoreSlim? requestPlaces = null;
         Task? reader = null;
+        Task? admission = null;
+        Task? replies = null;
 
         try {
             tasks = [];
@@ -50,11 +52,22 @@ internal sealed class WebSocketHandler(
                 SingleReader = true,
                 SingleWriter = true
             });
+            var incoming = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_options.MaxConcurrentRequestsPerConnection + CommandReserve) {
+                SingleReader = true,
+                SingleWriter = true
+            });
+            var pings = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) {
+                SingleReader = true,
+                SingleWriter = true,
+                FullMode = BoundedChannelFullMode.DropWrite
+            });
             foreach (var hook in hooks) {
                 await hook.OnOpenAsync(connectionContext);
             }
 
-            reader = ReceiveAsync(connection, queue.Writer, requestPlaces, requests, cancellationToken);
+            admission = AdmitMessagesAsync(connection, incoming.Reader, queue.Writer, requestPlaces, requests);
+            replies = ReplyToPingsAsync(connection, pings.Reader, requests);
+            reader = ReceiveAsync(connection, incoming.Writer, pings.Writer, requests, cancellationToken);
             try {
                 // Messages are handled in arrival order; the reader cancels requests when it stops.
                 while (await queue.Reader.WaitToReadAsync(requests.Token) && queue.Reader.TryPeek(out var data)) {
@@ -85,7 +98,9 @@ internal sealed class WebSocketHandler(
                 // The reader stopped: the peer closed or the transport failed. Its outcome is observed below.
             }
 
-            await reader;
+            if (reader.IsCompleted) {
+                await reader;
+            }
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             Log.Cancelled(logger, null);
         } catch (WebSocketException error) {
@@ -94,6 +109,12 @@ internal sealed class WebSocketHandler(
             Log.HandlerFailed(logger, error);
         } finally {
             if (requests is not null && requestPlaces is not null) {
+                if (admission is not null) {
+                    tasks!.Add(admission);
+                }
+                if (replies is not null) {
+                    tasks!.Add(replies);
+                }
                 await ShutdownAsync(connection, tasks!, requests, reader, requestPlaces);
             } else {
                 connection.Dispose();
@@ -117,12 +138,12 @@ internal sealed class WebSocketHandler(
         }
     }
 
-    // Keeps a receive pending even while every request slot is busy, so keep-alive PONGs and ping are
-    // processed under load. Everything else is queued for the dispatcher in arrival order.
+    // Admission and replies never block the only transport reader. A peer that outruns the bounded
+    // intake is disconnected instead of moving backpressure into ManagedWebSocket's PONG processing.
     private async Task ReceiveAsync(
         WebSocketConnection connection,
-        ChannelWriter<byte[]> queue,
-        SemaphoreSlim requestPlaces,
+        ChannelWriter<byte[]> incoming,
+        ChannelWriter<bool> pings,
         CancellationTokenSource requests,
         CancellationToken cancellationToken
     ) {
@@ -134,19 +155,47 @@ internal sealed class WebSocketHandler(
                 }
 
                 if (message.Data.AsSpan().SequenceEqual(_ping)) {
-                    await connection.SendAsync(_pong, cancellationToken);
-                } else if (message.Data.AsSpan().StartsWith(_auth) || message.Data.AsSpan().SequenceEqual(_logout)) {
-                    // Commands share FIFO order with requests, but never stop receiving while waiting for space.
-                    if (!queue.TryWrite(message.Data)) {
-                        await connection.CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, "Command queue capacity exceeded", cancellationToken);
-                        return;
-                    }
-                } else {
-                    await EnqueueAsync(message.Data, connection, queue, requestPlaces, requests.Token);
+                    pings.TryWrite(true);
+                } else if (!incoming.TryWrite(message.Data)) {
+                    await connection.CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, "Admission queue capacity exceeded", cancellationToken);
+                    return;
                 }
             }
         } finally {
             // Like the former single loop, a stopped reader ends dispatching and cancels running handlers.
+            requests.Cancel();
+            incoming.TryComplete();
+            pings.TryComplete();
+        }
+    }
+
+    private async Task AdmitMessagesAsync(WebSocketConnection connection, ChannelReader<byte[]> incoming, ChannelWriter<byte[]> queue, SemaphoreSlim requestPlaces, CancellationTokenSource requests) {
+        try {
+            await foreach (var data in incoming.ReadAllAsync(requests.Token)) {
+                if (data.AsSpan().StartsWith(_auth) || data.AsSpan().SequenceEqual(_logout)) {
+                    if (!queue.TryWrite(data)) {
+                        await connection.CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, "Command queue capacity exceeded", requests.Token);
+                        return;
+                    }
+                } else {
+                    await EnqueueAsync(data, connection, queue, requestPlaces, requests.Token);
+                }
+            }
+        } catch (OperationCanceledException) when (requests.IsCancellationRequested) {
+            // The connection ended while waiting for admission or writing Busy.
+        } finally {
+            requests.Cancel();
+        }
+    }
+
+    private async Task ReplyToPingsAsync(WebSocketConnection connection, ChannelReader<bool> pings, CancellationTokenSource requests) {
+        try {
+            await foreach (var _ in pings.ReadAllAsync(requests.Token)) {
+                await connection.SendAsync(_pong, requests.Token);
+            }
+        } catch (OperationCanceledException) when (requests.IsCancellationRequested) {
+            // Closing cancels the pending PONG write without blocking reception.
+        } finally {
             requests.Cancel();
         }
     }
@@ -404,9 +453,13 @@ internal sealed class WebSocketHandler(
         }
 
         if (reader is not null) {
-            // A reader still waiting for data after the close attempt would keep the connection undisposed.
-            if (!reader.IsCompleted) {
+            try {
+                // Admission may initiate close while the transport reader awaits the peer's close frame.
+                await reader.WaitAsync(timeout.Token);
+            } catch (OperationCanceledException) when (timeout.IsCancellationRequested) {
                 connection.WebSocket.Abort();
+            } catch (Exception error) {
+                Log.Closed(logger, error);
             }
 
             tasks.Add(reader);

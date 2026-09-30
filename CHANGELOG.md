@@ -276,6 +276,11 @@ include migration guidance before a release is published.
 
 ### Fixed
 
+- #34: Request admission and reply writes no longer stall transport reads under
+  saturation. `RequestQueueTimeout` and FIFO command order are preserved by a
+  separate bounded intake. In the upcoming 5.0 release, peers that overflow that
+  intake close with status 1008; clients should pace request batches by replies.
+  Pending text pings are coalesced while a PONG write is busy.
 - DWA-18 (#25): A .NET client `LogoutAsync` rejected by `MaxPendingRequests` no longer
   disables the authentication token provider; only a started logout does.
 - DWA-08 (#24): When .NET client subscribers keep failing and an `Error` observer is
