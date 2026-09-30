@@ -16,7 +16,7 @@ public sealed record BroadcastMessage(
     [property: JsonPropertyName("data"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(BroadcastDataConverter))]
     JsonElement? Data
 ) : IJsonOnDeserialized {
-    /// <summary>Gets the group union of a Groups message. Null for single-target messages.</summary>
+    /// <summary>Gets the group union of a Groups message. Null for single-target messages. Caller-supplied lists must not be mutated while the message is in use.</summary>
     [JsonPropertyName("groups"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? GroupNames { get; init; }
 

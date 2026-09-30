@@ -55,7 +55,9 @@ await PublishAsync(
 - When both are set, a connection matching either is skipped.
 - `All`, `Connection`, and `Session` do not take exclusions.
 
-`Groups` reads its sequence once and removes duplicates. An empty sequence publishes
+`Groups` reads its sequence once and removes duplicates. Its group snapshot is
+immutable, including through collection casts, and stays stable in `Except` copies.
+Changing the original list does not change the target. An empty sequence publishes
 nothing, and unknown groups have no recipients. Null collections and blank ids,
 group names, or action names are rejected with an argument exception. An already
 cancelled token throws before publishing.
@@ -113,3 +115,6 @@ change when the backplane changes.
 A custom backplane implements `PublishAsync(BroadcastMessage)`, `SubscribeAsync(listener)`,
 and `UnsubscribeAsync()`. Register it as a singleton `IDarkWsBackplane` with
 `services.Replace(...)`, or with `AddSingleton` before calling `AddDarkWs()`.
+
+If you construct a `BroadcastMessage` directly, keep its caller-supplied group list
+unchanged while the message is in use; that low-level DTO does not copy the list.

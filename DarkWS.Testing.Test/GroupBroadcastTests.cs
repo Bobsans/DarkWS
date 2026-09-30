@@ -77,6 +77,11 @@ public sealed class GroupBroadcastTests {
         }
         var snapshot = BroadcastTarget.Groups(Once());
         groups[0] = "changed";
+        foreach (var target in new[] { snapshot, snapshot.ExceptConnection("c"), snapshot.ExceptSession("s") }) {
+            Assert.That(target.GroupNames, Is.Not.InstanceOf<string[]>());
+            Assert.Throws<NotSupportedException>(() => ((IList<string>)target.GroupNames!)[0] = "mutated");
+            Assert.That(target.GroupNames, Is.EqualTo(new[] { "a" }));
+        }
         await broadcaster.PublishAsync(snapshot, "snapshot");
         Assert.That(enumerations, Is.EqualTo(1));
         Assert.That(host.Broadcasts.Last().GroupNames, Is.EqualTo(new[] { "a" }));

@@ -18,7 +18,7 @@ public sealed class BroadcastTarget {
     /// <summary>Gets the connection, session, or group key; null for All and Groups.</summary>
     public string? Id { get; }
 
-    /// <summary>Gets the distinct groups of a Groups target in first-seen order; null for other kinds.</summary>
+    /// <summary>Gets the immutable snapshot of distinct groups in first-seen order; null for other kinds.</summary>
     public IReadOnlyList<string>? GroupNames { get; }
 
     /// <summary>Gets the exclusions of a Group or Groups target, or null.</summary>
@@ -49,7 +49,7 @@ public sealed class BroadcastTarget {
         if (ids.Any(string.IsNullOrWhiteSpace)) {
             throw new ArgumentException("Group names must be non-empty.", nameof(groups));
         }
-        return new BroadcastTarget(BroadcastTargetType.Groups, null, ids, null);
+        return new BroadcastTarget(BroadcastTargetType.Groups, null, Array.AsReadOnly(ids), null);
     }
 
     /// <summary>Returns a copy that skips this connection, replacing an earlier connection exclusion. Group targets only.</summary>
