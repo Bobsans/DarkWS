@@ -6,6 +6,8 @@ include migration guidance before a release is published.
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-09-30
+
 ### Added
 
 - DWA-07: Browser `maxPendingRequests` (default 256) bounds application requests and
@@ -276,15 +278,20 @@ include migration guidance before a release is published.
 
 ### Fixed
 
+- Browser per-request `timeout`, whether passed to `request()` or returned by
+  `requestOptions`, must be between 0 and 2147483647 ms. Negative and `NaN` values
+  no longer disable the reply timer, and `Infinity` or larger values no longer
+  overflow into an immediate timeout; such calls reject with `RangeError` before
+  connecting.
 - #40: Redis subscriptions now use a bounded callback-fed queue (default 256) with
-  drop-newest overflow and observable received/dropped/rejected counters. The
-  upcoming 5.0 release also defaults Redis envelopes to 1 MiB: oversize local
+  drop-newest overflow and observable received/dropped/rejected counters. Redis
+  envelopes now also default Redis envelopes to 1 MiB: oversize local
   publications throw and inbound values are dropped. Configure both limits with
   `AddRedis(channel, options => ...)`, rate-limit publishers, and reload state after
   gaps; the 16-worker limit and at-most-once, unordered delivery remain unchanged.
 - #34: Request admission and reply writes no longer stall transport reads under
   saturation. `RequestQueueTimeout` and FIFO command order are preserved by a
-  separate bounded intake. In the upcoming 5.0 release, peers that overflow that
+  separate bounded intake. Peers that overflow that
   intake close with status 1008; clients should pace request batches by replies.
   Pending text pings are coalesced while a PONG write is busy.
 - DWA-18 (#25): A .NET client `LogoutAsync` rejected by `MaxPendingRequests` no longer
@@ -565,7 +572,8 @@ fragmented messages before rollout. The three-argument WebSocketConnection
 constructor remains available. This entry records the behavior of the already
 released 2.1.0; it does not retroactively change its version or defaults.
 
-[Unreleased]: https://github.com/Bobsans/DarkWS/compare/v4.0.0...HEAD
+[Unreleased]: https://github.com/Bobsans/DarkWS/compare/v5.0.0...HEAD
+[5.0.0]: https://github.com/Bobsans/DarkWS/compare/v4.0.0...v5.0.0
 [4.0.0]: https://github.com/Bobsans/DarkWS/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/Bobsans/DarkWS/compare/v2.1.0...v3.0.0
 [2.1.0]: https://github.com/Bobsans/DarkWS/compare/v2.0.0...v2.1.0

@@ -1,5 +1,10 @@
 #nullable enable
-DarkWS.Redis.DarkWsRedisServiceCollectionExtensions
-DarkWS.Redis.RedisConfiguration
-static DarkWS.Redis.DarkWsRedisServiceCollectionExtensions.AddDarkWsRedis(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! channel) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
-static DarkWS.Redis.RedisConfiguration.AddDarkWsRedis(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! channel) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+DarkWS.Redis.DarkWsRedisBuilderExtensions
+DarkWS.Redis.DarkWsRedisOptions
+DarkWS.Redis.DarkWsRedisOptions.DarkWsRedisOptions() -> void
+DarkWS.Redis.DarkWsRedisOptions.MaxMessageSizeBytes.get -> int
+DarkWS.Redis.DarkWsRedisOptions.MaxMessageSizeBytes.set -> void
+DarkWS.Redis.DarkWsRedisOptions.QueueCapacity.get -> int
+DarkWS.Redis.DarkWsRedisOptions.QueueCapacity.set -> void
+static DarkWS.Redis.DarkWsRedisBuilderExtensions.AddRedis(this DarkWS.DarkWsBuilder! builder, string! channel) -> DarkWS.DarkWsBuilder!
+static DarkWS.Redis.DarkWsRedisBuilderExtensions.AddRedis(this DarkWS.DarkWsBuilder! builder, string! channel, System.Action<DarkWS.Redis.DarkWsRedisOptions!>? configure) -> DarkWS.DarkWsBuilder!

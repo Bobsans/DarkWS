@@ -106,10 +106,10 @@ Full numbers and methodology: [Performance](https://bobsans.github.io/DarkWS/per
 
 | | |
 | --- | --- |
-| .NET tests | 278, run on .NET 8, 9, and 10 |
-| Browser client tests | 127 |
-| Line coverage | 94.9–100% per package, gated at 90% |
-| Branch coverage | 93.1–100% per package, gated at 80% |
+| .NET tests | 305, run on .NET 8, 9, and 10 |
+| Browser client tests | 161 |
+| Line coverage | 93.2–100% per package, gated at 90% |
+| Branch coverage | 91.7–100% per package, gated at 80% |
 | Redis | Integration tests against real Redis, StackExchange.Redis 2.13 and 3.2 |
 | Packages | NuGet: clean installed-consumer smoke tests. npm: clean prepack build and required tarball file checks |
 | Public API | Tracked with PublicApiAnalyzers; breaking changes only in major versions |

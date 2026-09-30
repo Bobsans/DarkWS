@@ -56,7 +56,7 @@ export interface DarkWsRetryOptions {
 }
 
 export interface DarkWsRequestOptions {
-  /** Reply timeout per attempt, in milliseconds. Defaults to requestTimeout; 0 disables it. */
+  /** Reply timeout per attempt, 0 to 2147483647 ms. Defaults to requestTimeout; 0 disables it. */
   timeout?: number;
   retry?: DarkWsRetryOptions;
 }
@@ -308,6 +308,9 @@ export default class DarkWs {
         !Number.isSafeInteger(timeoutRetries) || timeoutRetries < 0 ||
         !Number.isFinite(jitter) || jitter < 0 || jitter > 2147483647) {
       throw new RangeError("Retry counts must be non-negative safe integers; jitter must be between 0 and 2147483647 ms");
+    }
+    if (timeout !== undefined && (!Number.isFinite(timeout) || timeout < 0 || timeout > 2147483647)) {
+      throw new RangeError("timeout must be between 0 and 2147483647 ms");
     }
 
     const generation = this.closeGeneration;

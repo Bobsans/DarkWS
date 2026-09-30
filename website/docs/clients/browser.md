@@ -97,8 +97,8 @@ const user = await client.request<User>("user:get", { id: "42" }, {
 - Server error replies are never retried, and neither are authentication commands.
 - Retries may open a connection even with `reconnect: false`. `close()` and
   `dispose()` cancel them.
-- Counts must be non-negative safe integers and jitter within 0–2147483647 ms, or the
-  call rejects with `RangeError` before connecting.
+- Counts must be non-negative safe integers and `timeout` and jitter within
+  0–2147483647 ms, or the call rejects with `RangeError` before connecting.
 
 `ConnectionClosedError.sent` is true if any attempt reached `WebSocket.send()`. It
 does not prove the server ran the action; `false` means nothing was sent, so a retry

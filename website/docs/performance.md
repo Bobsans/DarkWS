@@ -60,23 +60,23 @@ Every change runs the full suite on .NET 8, 9, and 10:
 
 | Suite | Tests |
 | --- | ---: |
-| Server (`DarkWS`) | 175 |
-| .NET client | 52 |
+| Server (`DarkWS`) | 193 |
+| .NET client | 56 |
 | Testing package | 29 |
-| Redis backplane (real Redis in Docker) | 22 |
-| Browser client (Vitest) | 127 |
+| Redis backplane (real Redis in Docker) | 27 |
+| Browser client (Vitest) | 161 |
 
 Coverage gates fail the build below 90% lines or 80% branches for any package.
 Current coverage:
 
 | Package | Lines | Branches |
 | --- | ---: | ---: |
-| `DarkWS` | 97.4% | 95.3% |
-| `DarkWS.Redis` | 94.9% | 100% |
-| `DarkWS.Client` | 96.2% | 93.1% |
+| `DarkWS` | 97.6% | 94.3% |
+| `DarkWS.Redis` | 93.2% | 91.7% |
+| `DarkWS.Client` | 96.3% | 92.3% |
 | `DarkWS.Client.DependencyInjection` | 100% | 100% |
 | `DarkWS.Testing` | 100% | 100% |
-| `darkws` | 98.9% | 95.9% |
+| `darkws` | 99.0% | 97.1% |
 
 Besides unit tests, the gate:
 

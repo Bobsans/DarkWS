@@ -1463,6 +1463,18 @@ describe("DarkWs", () => {
       invalid.dispose();
     });
 
+    it.each([-1, NaN, Infinity, 2147483648])("rejects an invalid request timeout before connecting: %s", async timeout => {
+      const explicit = createClient();
+      await expect(explicit.request("read", undefined, { timeout })).rejects.toBeInstanceOf(RangeError);
+      await expect(explicit.request("read", undefined, timeout)).rejects.toBeInstanceOf(RangeError);
+      const defaults = createClient({ requestOptions: () => ({ timeout }) });
+      await expect(defaults.request("read")).rejects.toBeInstanceOf(RangeError);
+      expect(MockWebSocket.instances).toHaveLength(0);
+      expect(explicit.pendingRequestCount).toBe(0);
+      explicit.dispose();
+      defaults.dispose();
+    });
+
     it("does not consult the provider for authentication commands", async () => {
       const requestOptions = vi.fn(() => undefined);
       const client = createClient({ requestOptions }).connect();

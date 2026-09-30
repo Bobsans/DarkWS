@@ -61,23 +61,23 @@ dotnet run --project benchmarks/DarkWS.Benchmarks -c Release
 
 | Набор | Тесты |
 | --- | ---: |
-| Сервер (`DarkWS`) | 175 |
-| .NET-клиент | 52 |
+| Сервер (`DarkWS`) | 193 |
+| .NET-клиент | 56 |
 | Пакет для тестирования | 29 |
-| Redis backplane (настоящий Redis в Docker) | 22 |
-| Браузерный клиент (Vitest) | 127 |
+| Redis backplane (настоящий Redis в Docker) | 27 |
+| Браузерный клиент (Vitest) | 161 |
 
 Пороги покрытия проваливают сборку, если у любого пакета покрытие ниже 90% по строкам
 или 80% по ветвям. Текущее покрытие:
 
 | Пакет | Строки | Ветви |
 | --- | ---: | ---: |
-| `DarkWS` | 97.4% | 95.3% |
-| `DarkWS.Redis` | 94.9% | 100% |
-| `DarkWS.Client` | 96.2% | 93.1% |
+| `DarkWS` | 97.6% | 94.3% |
+| `DarkWS.Redis` | 93.2% | 91.7% |
+| `DarkWS.Client` | 96.3% | 92.3% |
 | `DarkWS.Client.DependencyInjection` | 100% | 100% |
 | `DarkWS.Testing` | 100% | 100% |
-| `darkws` | 98.9% | 95.9% |
+| `darkws` | 99.0% | 97.1% |
 
 Помимо модульных тестов, проверка:
 
