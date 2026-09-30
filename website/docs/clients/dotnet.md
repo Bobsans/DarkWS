@@ -141,7 +141,8 @@ call `ConnectAsync`.
 
 Starting `LogoutAsync` disables the provider, even if the acknowledgement is lost.
 A logout rejected by `MaxPendingRequests` has not started and leaves it enabled.
-A later successful `AuthenticateAsync` re-enables it.
+Only an `AuthenticateAsync` invoked after that logout can re-enable it on success;
+earlier calls, including queued authentication commands, cannot undo the logout.
 
 ### HTTP-level credentials
 

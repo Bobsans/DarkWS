@@ -141,7 +141,8 @@ await using var client = new DarkWsClient(new DarkWsClientOptions {
 
 Начало `LogoutAsync` отключает провайдер, даже если подтверждение потеряно.
 Logout, отклонённый из-за `MaxPendingRequests`, не начинался и оставляет провайдер включённым.
-Последующий успешный `AuthenticateAsync` снова включает его.
+Только `AuthenticateAsync`, вызванный после этого logout, может снова включить
+провайдер при успехе; более ранние вызовы, включая команды в очереди, не отменяют logout.
 
 ### Учётные данные на уровне HTTP {#http-level-credentials}
 

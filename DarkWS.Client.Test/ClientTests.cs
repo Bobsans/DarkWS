@@ -356,6 +356,45 @@ public sealed class ClientTests {
     }
 
     [Test]
+    public async Task QueuedAuthenticationBeforeLogoutDoesNotRestoreTheProvider() {
+        await using var server = await TestServer.StartAsync();
+        var calls = 0;
+        await using var client = Client(server, options => options.AuthenticationTokenProvider = _ => {
+            Interlocked.Increment(ref calls);
+            return ValueTask.FromResult<string?>("provider");
+        });
+        var connected = client.ConnectAsync();
+        var socket = await server.AcceptAsync();
+        Assert.That(await TestServer.ReadAsync(socket), Is.EqualTo("auth:provider"));
+        await TestServer.SendAsync(socket, "auth:success");
+        await connected;
+
+        var first = client.AuthenticateAsync("A");
+        Assert.That(await TestServer.ReadAsync(socket), Is.EqualTo("auth:A"));
+        var second = client.AuthenticateAsync("B");
+        var logout = client.LogoutAsync();
+        await TestServer.SendAsync(socket, "auth:success");
+        await first;
+        Assert.That(await TestServer.ReadAsync(socket), Is.EqualTo("auth:B"));
+        await TestServer.SendAsync(socket, "auth:success");
+        await second;
+        Assert.That(await TestServer.ReadAsync(socket), Is.EqualTo("logout"));
+        await TestServer.SendAsync(socket, "logout:success");
+        await logout;
+
+        await client.CloseAsync();
+        connected = client.ConnectAsync();
+        var response = client.RequestAsync<int>("public");
+        var next = await server.AcceptAsync();
+        var request = await TestServer.RequestAsync(next);
+        Assert.That(request.GetProperty("action").GetString(), Is.EqualTo("public"));
+        await TestServer.ReplyAsync(next, request);
+        await connected;
+        Assert.That(await response, Is.EqualTo(42));
+        Assert.That(calls, Is.EqualTo(1));
+    }
+
+    [Test]
     public async Task FailingSubscriberWithSlowErrorHandlerKeepsTheErrorQueueBounded() {
         const int capacity = 16;
         const int notifications = 10_000;

@@ -371,22 +371,20 @@ public sealed partial class DarkWsClient : IDarkWsClient {
 
         // Logout starts only once it holds a pending slot, so a call rejected by the limit keeps the token provider.
         // This still runs synchronously at the call, before any await, so call order decides the version.
-        if (token is null) {
-            lock (_sync) {
+        long version;
+        lock (_sync) {
+            if (token is null) {
                 _automaticAuthentication = false;
                 _authenticationVersion++;
             }
+
+            version = _authenticationVersion;
         }
 
         var entered = false;
         try {
             await _authentication.WaitAsync(wait.Token).ConfigureAwait(false);
             entered = true;
-            long version;
-            lock (_sync) {
-                version = _authenticationVersion;
-            }
-
             var connection = await GetConnectionAsync(false, wait.Token).ConfigureAwait(false);
             await ExchangeControlAsync(connection, token, wait.Token).ConfigureAwait(false);
             if (token is not null) {
