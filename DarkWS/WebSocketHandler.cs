@@ -35,18 +35,21 @@ internal sealed class WebSocketHandler(
         WebSocketConnection connection,
         CancellationToken cancellationToken = default
     ) {
-        storage.Add(connection);
-        var tasks = new List<Task>();
-        var requests = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var requestPlaces = new SemaphoreSlim(_options.MaxConcurrentRequestsPerConnection, _options.MaxConcurrentRequestsPerConnection);
-        var connectionContext = CreateContext(connection, requests.Token);
-        var queue = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_options.MaxConcurrentRequestsPerConnection + CommandReserve) {
-            SingleReader = true,
-            SingleWriter = true
-        });
+        List<Task>? tasks = null;
+        CancellationTokenSource? requests = null;
+        SemaphoreSlim? requestPlaces = null;
         Task? reader = null;
 
         try {
+            tasks = [];
+            requests = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            requestPlaces = new SemaphoreSlim(_options.MaxConcurrentRequestsPerConnection, _options.MaxConcurrentRequestsPerConnection);
+            storage.Add(connection);
+            var connectionContext = CreateContext(connection, requests.Token);
+            var queue = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(_options.MaxConcurrentRequestsPerConnection + CommandReserve) {
+                SingleReader = true,
+                SingleWriter = true
+            });
             foreach (var hook in hooks) {
                 await hook.OnOpenAsync(connectionContext);
             }
@@ -55,16 +58,14 @@ internal sealed class WebSocketHandler(
             try {
                 // Messages are handled in arrival order; the reader cancels requests when it stops.
                 while (await queue.Reader.WaitToReadAsync(requests.Token) && queue.Reader.TryPeek(out var data)) {
-                    if (data.AsSpan().StartsWith(_auth)) {
+                    if (data.AsSpan().StartsWith(_auth) || data.AsSpan().SequenceEqual(_logout)) {
                         queue.Reader.TryRead(out _);
-                        var authenticated = await AuthenticateAsync(Encoding.UTF8.GetString(data.AsSpan(_auth.Length)), connection, cancellationToken);
-                        await connection.SendAsync(authenticated ? _authSuccess : _authFailed, cancellationToken);
-                    } else if (data.AsSpan().SequenceEqual(_logout)) {
-                        queue.Reader.TryRead(out _);
-                        await SetSessionAsync(connection, null, cancellationToken);
-                        await connection.SendAsync(_logoutSuccess, cancellationToken);
+                        var command = ProcessCommandAsync(data, connection, requests.Token);
+                        tasks.Add(command);
+                        await command.WaitAsync(requests.Token);
+                        tasks.Remove(command);
                     } else {
-                        var input = await ReadMessageAsync(data, connection, cancellationToken);
+                        var input = await ReadMessageAsync(data, connection, requests.Token);
                         if (input is not null) {
                             tasks.RemoveAll(it => it.IsCompleted);
                             // The request keeps its queue place while waiting for a slot, so the queue bound stays exact.
@@ -92,7 +93,27 @@ internal sealed class WebSocketHandler(
         } catch (Exception error) {
             Log.HandlerFailed(logger, error);
         } finally {
-            await ShutdownAsync(connection, tasks, requests, reader, requestPlaces);
+            if (requests is not null && requestPlaces is not null) {
+                await ShutdownAsync(connection, tasks!, requests, reader, requestPlaces);
+            } else {
+                connection.Dispose();
+                requests?.Dispose();
+                requestPlaces?.Dispose();
+            }
+        }
+    }
+
+    private async Task ProcessCommandAsync(byte[] data, WebSocketConnection connection, CancellationToken cancellationToken) {
+        try {
+            if (data.AsSpan().StartsWith(_auth)) {
+                var authenticated = await AuthenticateAsync(Encoding.UTF8.GetString(data.AsSpan(_auth.Length)), connection, cancellationToken);
+                await connection.SendAsync(authenticated ? _authSuccess : _authFailed, cancellationToken);
+            } else {
+                await SetSessionAsync(connection, null, cancellationToken);
+                await connection.SendAsync(_logoutSuccess, cancellationToken);
+            }
+        } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+            // Peer close cancels commands just like ordinary requests.
         }
     }
 
@@ -319,6 +340,7 @@ internal sealed class WebSocketHandler(
             Log.AuthenticationFailed(logger, error);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         if (session is not null || !_options.KeepSessionOnFailedAuthentication) {
             await SetSessionAsync(connection, session, cancellationToken);
         } else {
@@ -329,11 +351,13 @@ internal sealed class WebSocketHandler(
     }
 
     private async Task SetSessionAsync(WebSocketConnection connection, IDarkWsSession? session, CancellationToken cancellationToken) {
+        cancellationToken.ThrowIfCancellationRequested();
         var previousSession = connection.Session;
         storage.SetSession(connection, session);
         connection.HttpContext.User = session?.User ?? new ClaimsPrincipal(new ClaimsIdentity());
         var context = CreateContext(connection, cancellationToken);
         foreach (var hook in hooks) {
+            cancellationToken.ThrowIfCancellationRequested();
             await hook.OnAuthenticatedAsync(context, previousSession);
         }
     }

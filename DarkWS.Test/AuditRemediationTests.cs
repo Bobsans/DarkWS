@@ -265,6 +265,83 @@ public sealed class AuditRemediationTests {
         Assert.That(socket.Sent, Is.Empty);
     }
 
+    [TestCase("auth:wait-for-cancellation", false)]
+    [TestCase("auth:ignore-cancellation", true)]
+    [TestCase("auth:token", false)]
+    [TestCase("auth:token", true)]
+    [TestCase("logout", false)]
+    [TestCase("logout", true)]
+    public async Task PeerCloseCancelsAuthenticationAndBoundsUncooperativeCallbacks(string command, bool ignoreCancellation) {
+        var inAuthenticator = command is "auth:wait-for-cancellation" or "auth:ignore-cancellation";
+        await using var provider = CreateProvider(register: services => {
+            if (!inAuthenticator) {
+                services.AddSingleton<DarkWsConnectionHooks>(sp => new WaitingAuthenticationHook(sp.GetRequiredService<Probe>(), ignoreCancellation));
+            }
+        });
+        var probe = provider.GetRequiredService<Probe>();
+        var socket = new TestWebSocket();
+        var connection = CreateConnection(provider, socket);
+        using var cancellation = new CancellationTokenSource();
+        var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(connection, cancellation.Token);
+        try {
+            socket.EnqueueReceive(command);
+            await probe.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            socket.EnqueueClose();
+            await accept.WaitAsync(TimeSpan.FromSeconds(2));
+            await probe.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.That(cancellation.IsCancellationRequested, Is.False);
+            Assert.That(provider.GetRequiredService<ConnectionStorage>().GetAll(), Is.Empty);
+            if (ignoreCancellation) {
+                Assert.That(socket.WasAborted, Is.True);
+                Assert.That(socket.WasDisposed, Is.False);
+                if (inAuthenticator) {
+                    Assert.That(probe.ScopeDisposed, Is.False);
+                }
+            } else {
+                await UntilAsync(() => socket.WasDisposed);
+            }
+            connection.CompleteUpgradeRequest();
+        } finally {
+            probe.Release.TrySetResult();
+            cancellation.Cancel();
+            await accept.WaitAsync(TimeSpan.FromSeconds(2));
+            await UntilAsync(() => socket.WasDisposed);
+        }
+
+        if (inAuthenticator) {
+            Assert.That(probe.ScopeDisposed, Is.True);
+            Assert.That(connection.Session, Is.Null);
+        }
+        Assert.That(socket.Sent, Is.Empty);
+    }
+
+    [TestCase("auth:token")]
+    [TestCase("logout")]
+    public async Task PeerCloseCancelsCommandWrites(string command) {
+        await using var provider = CreateProvider();
+        var socket = new TestWebSocket { SendBarrier = new TaskCompletionSource().Task };
+        var accept = provider.GetRequiredService<WebSocketHandler>().AcceptAsync(CreateConnection(provider, socket));
+        socket.EnqueueReceive(command);
+        await socket.SendStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        socket.EnqueueClose();
+        await accept.WaitAsync(TimeSpan.FromSeconds(2));
+        await UntilAsync(() => socket.WasDisposed);
+        Assert.That(socket.Sent, Is.Empty);
+        Assert.That(provider.GetRequiredService<ConnectionStorage>().GetAll(), Is.Empty);
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task InitialSessionFailureStillDisposesTheSocket(bool brokenId) {
+        await using var provider = CreateProvider();
+        var socket = new TestWebSocket();
+        var connection = new WebSocketConnection(socket, new DefaultHttpContext { RequestServices = provider }, new BrokenSession(brokenId));
+        await provider.GetRequiredService<WebSocketHandler>().AcceptAsync(connection).WaitAsync(TimeSpan.FromSeconds(2));
+        await UntilAsync(() => socket.WasDisposed);
+        Assert.That(connection.IsOpen, Is.False);
+        Assert.That(provider.GetRequiredService<ConnectionStorage>().GetAll(), Is.Empty);
+    }
+
     [Test]
     public async Task ShutdownCloseHandshakeHasSameBoundedDeadline() {
         await using var provider = CreateProvider();
@@ -640,6 +717,26 @@ public sealed class AuditRemediationTests {
         }
     }
 
+    private sealed class WaitingAuthenticationHook(Probe probe, bool ignoreCancellation) : DarkWsConnectionHooks {
+        public override async Task OnAuthenticatedAsync(IDarkWsContextAccessor context, IDarkWsSession? previousSession) {
+            using var cancellation = context.ConnectionAborted.Register(() => probe.Cancelled.TrySetResult());
+            probe.Started.TrySetResult();
+            try {
+                await (ignoreCancellation ? probe.Release.Task : probe.Release.Task.WaitAsync(context.ConnectionAborted));
+            } finally {
+                if (context.ConnectionAborted.IsCancellationRequested) {
+                    probe.Cancelled.TrySetResult();
+                }
+            }
+        }
+    }
+
+    private sealed class BrokenSession(bool brokenId) : IDarkWsSession {
+        public string Id => brokenId ? throw new InvalidOperationException("Invalid session id") : "broken";
+        public ClaimsPrincipal User { get; } = new();
+        public IReadOnlyCollection<string> Groups => throw new InvalidOperationException("Invalid session groups");
+    }
+
     public sealed class ScopeLifetime(Probe probe) : IDisposable {
         public bool Disposed { get; private set; }
         public void Dispose() => Disposed = probe.ScopeDisposed = true;
@@ -755,7 +852,7 @@ public sealed class AuditRemediationTests {
 
     public sealed record Payload(string Text);
 
-    public sealed class AuditAuthenticator : IDarkWsAuthenticator {
+    public sealed class AuditAuthenticator : IDarkWsAuthenticator, IDisposable {
         private readonly Probe _probe;
         public AuditAuthenticator(Probe probe) {
             _probe = probe;
@@ -767,6 +864,11 @@ public sealed class AuditRemediationTests {
                 _probe.Started.TrySetResult();
                 try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); } finally { _probe.Cancelled.TrySetResult(); }
             }
+            if (token == "ignore-cancellation") {
+                using var cancellation = cancellationToken.Register(() => _probe.Cancelled.TrySetResult());
+                _probe.Started.TrySetResult();
+                await _probe.Release.Task;
+            }
             if (token is "rejected" or "throws") {
                 context.User = new ClaimsPrincipal(new ClaimsIdentity([], "ChangedByAuthenticator"));
             }
@@ -776,6 +878,8 @@ public sealed class AuditRemediationTests {
 
             return string.IsNullOrEmpty(token) || token == "rejected" ? null : new TestSession(token, new ClaimsPrincipal(new ClaimsIdentity([], "Test")));
         }
+
+        public void Dispose() => _probe.ScopeDisposed = true;
     }
 
     private sealed class BroadcastConverter : JsonConverter<BroadcastActionMessage> {

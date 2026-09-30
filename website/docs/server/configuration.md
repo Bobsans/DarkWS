@@ -101,9 +101,16 @@ Both clients also detect dead servers with their own ping/pong timeout.
   socket. On expiry the socket is aborted.
 - Broadcasts use the shorter `BroadcastSendTimeout` per recipient, so a slow client
   cannot hold up others.
-- On shutdown the connection leaves storage immediately and handler tokens are
-  cancelled. `ShutdownTimeout` is one shared deadline for pending handlers, close
-  hooks, and the close handshake; after it the socket is aborted.
+- On shutdown the connection leaves storage immediately. Peer close cancels action,
+  authentication, authentication-hook, and command-write tokens. `ShutdownTimeout`
+  is one shared deadline for pending actions and commands, close hooks, and the
+  close handshake; after it the socket is aborted.
+- Callbacks that ignore cancellation keep their scope and deferred connection
+  resources until they finish. Shutdown still completes within its deadline;
+  late authentication results and replies are discarded. Copy required HTTP
+  context values before such work because the upgrade request can already be over.
+- The accepted socket is also closed and disposed if initial session registration
+  fails, including exceptions from the session's `Id` or `Groups`.
 
 ## JSON
 
