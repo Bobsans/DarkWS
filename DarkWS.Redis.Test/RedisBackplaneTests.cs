@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Net.WebSockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -73,6 +74,19 @@ public sealed class RedisBackplaneTests {
     public void EmptyChannelIsRejected() {
         var builder = new ServiceCollection().AddDarkWs();
         Assert.Throws<ArgumentException>(() => builder.AddRedis(" "));
+    }
+
+    [TestCase(0, 1024)]
+    [TestCase(-1, 1024)]
+    [TestCase(8, 0)]
+    [TestCase(8, -1)]
+    public void InvalidBufferLimitsAreRejected(int capacity, int size) {
+        var builder = new ServiceCollection().AddDarkWs();
+        Assert.Throws<ArgumentOutOfRangeException>(() => builder.AddRedis("invalid", options => {
+            options.QueueCapacity = capacity;
+            options.MaxMessageSizeBytes = size;
+        }));
+        Assert.DoesNotThrow(() => builder.AddRedis("valid"));
     }
 
     [Test]
@@ -332,6 +346,108 @@ public sealed class RedisBackplaneTests {
     }
 
     [Test]
+    public async Task SustainedOverloadBoundsRedisBacklogAndReportsDropsAndSizeRejections() {
+        const int capacity = 8;
+        const int maxSize = 64 * 1024;
+        var channel = $"darkws-test:{Guid.NewGuid():N}";
+        long received = 0, dropped = 0, oversize = 0, rejected = 0;
+        using var metrics = new MeterListener();
+        metrics.InstrumentPublished = (instrument, listener) => {
+            if (instrument.Meter.Name == "DarkWS.Redis") {
+                listener.EnableMeasurementEvents(instrument);
+            }
+        };
+        metrics.SetMeasurementEventCallback<long>((instrument, count, tags, _) => {
+            var ownChannel = false;
+            var tooLarge = false;
+            foreach (var tag in tags) {
+                ownChannel |= tag.Key == "channel" && Equals(tag.Value, channel);
+                tooLarge |= tag.Key == "reason" && Equals(tag.Value, "oversize");
+            }
+            if (!ownChannel) {
+                return;
+            }
+            if (instrument.Name == "darkws.redis.received") {
+                Interlocked.Add(ref received, count);
+            }
+            if (instrument.Name == "darkws.redis.rejected") {
+                Interlocked.Add(ref rejected, count);
+            }
+            if (instrument.Name == "darkws.redis.dropped") {
+                Interlocked.Add(ref dropped, count);
+                if (tooLarge) {
+                    Interlocked.Add(ref oversize, count);
+                }
+            }
+        });
+        metrics.Start();
+        await using var provider = CreateProvider(channel, configureRedis: options => {
+            options.QueueCapacity = capacity;
+            options.MaxMessageSizeBytes = maxSize;
+        });
+        var backplane = provider.GetRequiredService<IDarkWsBackplane>();
+        var started = 0;
+        var stopped = 0;
+        var saturated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await backplane.SubscribeAsync(async (_, token) => {
+            if (Interlocked.Increment(ref started) == 16) {
+                saturated.TrySetResult();
+            }
+            try {
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            } finally {
+                if (Interlocked.Increment(ref stopped) == 16) {
+                    cancelled.TrySetResult();
+                }
+            }
+        });
+        var message = new BroadcastMessage(BroadcastTargetType.All, null, "load", JsonSerializer.SerializeToElement(new string('x', 32 * 1024)));
+        var retained = new List<long>();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        try {
+            for (var index = 0; index < 16; index++) {
+                await backplane.PublishAsync(message);
+                while (Volatile.Read(ref started) <= index) {
+                    await Task.Delay(10, deadline.Token);
+                }
+            }
+            await saturated.Task.WaitAsync(deadline.Token);
+            for (var window = 1; window <= 3; window++) {
+                for (var index = 0; index < 200; index++) {
+                    await backplane.PublishAsync(message);
+                }
+                var published = 16 + window * 200;
+                while (Volatile.Read(ref received) < published) {
+                    await Task.Delay(10, deadline.Token);
+                }
+                var pending = received - started - dropped;
+                retained.Add(GC.GetTotalMemory(forceFullCollection: true));
+                TestContext.Progress.WriteLine($"Redis overload: received={received}, active={started}, pending={pending}, dropped={dropped}, retained={retained[^1]}");
+                Assert.That(started, Is.EqualTo(16));
+                Assert.That(pending, Is.EqualTo(capacity));
+                Assert.That(dropped, Is.EqualTo(window * 200 - capacity));
+            }
+            Assert.That(retained.Max() - retained.Min(), Is.LessThan(8L * 1024 * 1024));
+
+            var large = message with { Data = JsonSerializer.SerializeToElement(new string('x', maxSize)) };
+            await Assert.ThrowsAsync<ArgumentException>(async () => await backplane.PublishAsync(large));
+            Assert.That(rejected, Is.EqualTo(1));
+            await _connection.GetSubscriber().PublishAsync(RedisChannel.Literal(channel), new byte[maxSize + 1]);
+            while (Volatile.Read(ref received) < 617) {
+                await Task.Delay(10, deadline.Token);
+            }
+            Assert.That(oversize, Is.EqualTo(1));
+            await backplane.UnsubscribeAsync();
+            await cancelled.Task.WaitAsync(deadline.Token);
+            Assert.That(stopped, Is.EqualTo(16));
+            Assert.That(await _connection.GetSubscriber().PublishAsync(RedisChannel.Literal(channel), "after-stop"), Is.Zero);
+        } finally {
+            await backplane.UnsubscribeAsync();
+        }
+    }
+
+    [Test]
     public async Task StuckRecipientLoadKeepsBacklogAndRetainedMemoryStable() {
         await using var provider = CreateProvider($"darkws-test:{Guid.NewGuid():N}",
             options => options.BroadcastSendTimeout = TimeSpan.FromMilliseconds(100));
@@ -515,13 +631,13 @@ public sealed class RedisBackplaneTests {
         public void Dispose() => IsOpen = false;
     }
 
-    private ServiceProvider CreateProvider(string channel, Action<DarkWsOptions>? configure = null, bool useRedis = true) {
+    private ServiceProvider CreateProvider(string channel, Action<DarkWsOptions>? configure = null, bool useRedis = true, Action<DarkWsRedisOptions>? configureRedis = null) {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(_connection);
         var darkWs = services.AddDarkWs(configure);
         if (useRedis) {
-            darkWs.AddRedis(channel);
+            darkWs.AddRedis(channel, configureRedis);
         }
 
         return services.BuildServiceProvider();

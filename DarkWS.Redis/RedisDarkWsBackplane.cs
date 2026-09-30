@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using System.Text.Json;
 using System.Threading.Channels;
 using DarkWS.Abstractions;
@@ -12,10 +13,16 @@ internal sealed class RedisDarkWsBackplane(
     ILogger<RedisDarkWsBackplane> logger
 ) : IDarkWsBackplane {
     private const int ConcurrentDeliveries = 16;
+    private static readonly Meter _meter = new("DarkWS.Redis");
+    private static readonly Counter<long> _received = _meter.CreateCounter<long>("darkws.redis.received", "{message}");
+    private static readonly Counter<long> _dropped = _meter.CreateCounter<long>("darkws.redis.dropped", "{message}");
+    private static readonly Counter<long> _rejected = _meter.CreateCounter<long>("darkws.redis.rejected", "{message}");
     private readonly RedisChannel _channel = RedisChannel.Literal(redisOptions.Channel);
+    private readonly KeyValuePair<string, object?> _channelTag = new("channel", redisOptions.Channel);
     private static readonly JsonSerializerOptions _jsonOptions = CreateJsonOptions();
     private readonly SemaphoreSlim _subscriptionLock = new(1, 1);
-    private ChannelMessageQueue? _subscription;
+    private Action<RedisChannel, RedisValue>? _subscription;
+    private Channel<RedisValue>? _subscriptionQueue;
     private CancellationTokenSource? _subscriptionCancellation;
     private Task? _subscriptionDeliveries;
 
@@ -27,6 +34,10 @@ internal sealed class RedisDarkWsBackplane(
         cancellationToken.ThrowIfCancellationRequested();
         // UTF-8 bytes go to Redis as they are, without a UTF-16 string in between.
         var json = JsonSerializer.SerializeToUtf8Bytes(message, _jsonOptions);
+        if (json.Length > redisOptions.MaxMessageSizeBytes) {
+            _rejected.Add(1, _channelTag);
+            throw new ArgumentException("The serialized Redis broadcast exceeds MaxMessageSizeBytes.", nameof(message));
+        }
         await connection.GetSubscriber().PublishAsync(_channel, json);
     }
 
@@ -43,15 +54,38 @@ internal sealed class RedisDarkWsBackplane(
             }
 
             var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var queue = Channel.CreateBounded<RedisValue>(new BoundedChannelOptions(redisOptions.QueueCapacity) {
+                SingleReader = false,
+                SingleWriter = false
+            });
+            var token = lifetime.Token;
+            Action<RedisChannel, RedisValue> subscription = (_, message) => {
+                if (token.IsCancellationRequested) {
+                    return;
+                }
+                if (message.Length() > redisOptions.MaxMessageSizeBytes) {
+                    _dropped.Add(1, _channelTag, new("reason", "oversize"));
+                } else if (!queue.Writer.TryWrite(message)) {
+                    // TryWrite never waits: drop the newest message instead of growing a Redis-owned queue.
+                    _dropped.Add(1, _channelTag, new("reason", "capacity"));
+                }
+                _received.Add(1, _channelTag);
+            };
             try {
-                var subscription = await connection.GetSubscriber().SubscribeAsync(_channel);
-                var token = lifetime.Token;
+                await connection.GetSubscriber().SubscribeAsync(_channel, subscription);
                 _subscriptionDeliveries = Task.WhenAll(Enumerable.Range(0, ConcurrentDeliveries)
-                    .Select(_ => Task.Run(() => ReceiveAsync(subscription, listener, token))));
+                    .Select(_ => Task.Run(() => ReceiveAsync(queue.Reader, listener, token))));
                 _subscriptionCancellation = lifetime;
                 _subscription = subscription;
+                _subscriptionQueue = queue;
             } catch {
-                lifetime.Dispose();
+                await lifetime.CancelAsync();
+                queue.Writer.TryComplete();
+                try {
+                    await connection.GetSubscriber().UnsubscribeAsync(_channel, subscription);
+                } finally {
+                    lifetime.Dispose();
+                }
                 throw;
             }
         } finally {
@@ -68,9 +102,11 @@ internal sealed class RedisDarkWsBackplane(
             }
 
             await _subscriptionCancellation!.CancelAsync();
-            await _subscription.UnsubscribeAsync();
+            await connection.GetSubscriber().UnsubscribeAsync(_channel, _subscription);
+            _subscriptionQueue!.Writer.TryComplete();
             _ = DisposeWhenCompletedAsync(_subscriptionDeliveries!, _subscriptionCancellation);
             _subscription = null;
+            _subscriptionQueue = null;
             _subscriptionCancellation = null;
             _subscriptionDeliveries = null;
         } finally {
@@ -78,10 +114,10 @@ internal sealed class RedisDarkWsBackplane(
         }
     }
 
-    private async Task ReceiveAsync(ChannelMessageQueue subscription, Func<BroadcastMessage, CancellationToken, ValueTask> listener, CancellationToken token) {
+    private async Task ReceiveAsync(ChannelReader<RedisValue> subscription, Func<BroadcastMessage, CancellationToken, ValueTask> listener, CancellationToken token) {
         try {
             while (true) {
-                // Keep draining after lifetime cancellation until unsubscribe completes the Redis queue.
+                // Drain the bounded queue after cancellation, without invoking application listeners again.
                 var message = await subscription.ReadAsync();
                 await HandleMessageAsync(message, listener, token);
             }
@@ -100,10 +136,10 @@ internal sealed class RedisDarkWsBackplane(
         }
     }
 
-    private async Task HandleMessageAsync(ChannelMessage message, Func<BroadcastMessage, CancellationToken, ValueTask> listener, CancellationToken cancellationToken) {
+    private async Task HandleMessageAsync(RedisValue message, Func<BroadcastMessage, CancellationToken, ValueTask> listener, CancellationToken cancellationToken) {
         try {
             cancellationToken.ThrowIfCancellationRequested();
-            var broadcast = JsonSerializer.Deserialize<BroadcastMessage>((byte[])message.Message!, _jsonOptions);
+            var broadcast = JsonSerializer.Deserialize<BroadcastMessage>((byte[])message!, _jsonOptions);
             if (broadcast is not null) {
                 await listener(broadcast, cancellationToken);
             }

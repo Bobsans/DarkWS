@@ -25,7 +25,10 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(redis);
 builder.Services
     .AddDarkWs()
     .AddHandlersFromAssemblyContaining<Program>()
-    .AddRedis("my-app:production");
+    .AddRedis("my-app:production", options => {
+        options.QueueCapacity = 256;
+        options.MaxMessageSizeBytes = 1024 * 1024;
+    });
 ```
 
 - Use a unique channel per application and environment.
@@ -33,6 +36,8 @@ builder.Services
   silently switching channels.
 - The host owns the multiplexer and its lifetime.
 - Handler code does not change.
+- The configuration callback is optional; these are the defaults. Limits must be
+  positive and are copied at registration.
 
 The package requires StackExchange.Redis 2.13.17 or later and is tested against
 2.13.17 and 3.2.1.
@@ -54,9 +59,28 @@ clients reload from the source of truth.
 - Writes to one socket stay serialized, but broadcast order on a connection is not
   guaranteed. Include a version or sequence number when order matters.
 - `PublishAsync` completes when Redis accepts the message, not after delivery.
-- Pending messages wait in StackExchange.Redis's unbounded subscription queue.
-  Sustained publishing above delivery throughput grows memory. Limit publisher rate
-  and payload size.
+- A Redis callback feeds a bounded local queue without waiting for delivery. It
+  holds at most `QueueCapacity` messages; when full, the **new** message is dropped.
+  There is no replay or disconnect on overflow, and other publishers remain independent.
+- Serialized envelopes larger than `MaxMessageSizeBytes` are rejected by
+  `PublishAsync` with `ArgumentException` before publishing. Oversize values sent by
+  another publisher are dropped before deserialization.
+- Queued wire payload is bounded by `QueueCapacity * MaxMessageSizeBytes`; up to 16
+  more messages can be in active delivery. This is not a process memory limit:
+  publisher serialization, dependency/network buffers, and application allocations
+  are outside that queue. Also limit publication rate in the host.
+
+The `DarkWS.Redis` meter exposes counters tagged with `channel`:
+
+| Instrument | Meaning |
+| --- | --- |
+| `darkws.redis.received` | Messages observed by an active subscription, including dropped ones |
+| `darkws.redis.dropped` | Incoming messages discarded, tagged with `reason=capacity` or `reason=oversize` |
+| `darkws.redis.rejected` | Local publications rejected for exceeding the envelope size limit |
+
+Observe these with `MeterListener` or an OpenTelemetry metrics exporter. A successful
+publish still means only that Redis accepted the message; it cannot report a
+subscriber's overflow. Size the limits and reload application state when gaps matter.
 
 ## Trust boundary
 
@@ -67,8 +91,8 @@ every instance, including targeted sessions and groups.
 - Unique channel names separate environments but do not authorize anything.
 - Logical database numbers do **not** isolate Pub/Sub channels
   ([Redis documentation](https://redis.io/docs/latest/develop/pubsub/#database--scoping)).
-- `MaxMessageSizeBytes` limits WebSocket input, not Redis messages. Bound the data
-  your publishers produce.
+- `DarkWsOptions.MaxMessageSizeBytes` limits WebSocket input. The independent
+  `DarkWsRedisOptions.MaxMessageSizeBytes` limits the complete Redis envelope.
 
 ## Wire format
 
