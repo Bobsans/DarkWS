@@ -10,7 +10,7 @@ dependencies and no ASP.NET requirement, so it works in console apps, services,
 desktop apps, and integration tests.
 
 ```bash
-dotnet add package DarkWS.Client
+dotnet add package DarkWS.Client --version 4.0.0
 ```
 
 ```csharp
@@ -228,7 +228,7 @@ The client closes the socket with status 1003 if the server sends a binary frame
 references only DI abstractions, not ASP.NET or the Generic Host.
 
 ```bash
-dotnet add package DarkWS.Client.DependencyInjection
+dotnet add package DarkWS.Client.DependencyInjection --version 4.0.0
 ```
 
 ```csharp

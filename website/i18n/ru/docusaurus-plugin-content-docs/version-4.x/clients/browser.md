@@ -8,7 +8,7 @@ title: Браузерный клиент
 `darkws` — ESM-клиент без зависимостей, с объявлениями типов TypeScript.
 
 ```bash
-npm install darkws
+npm install darkws@4
 ```
 
 ```ts

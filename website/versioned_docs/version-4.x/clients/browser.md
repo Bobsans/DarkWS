@@ -8,7 +8,7 @@ title: Browser client
 `darkws` is a dependency-free ESM client with TypeScript declarations.
 
 ```bash
-npm install darkws
+npm install darkws@4
 ```
 
 ```ts

@@ -6,6 +6,9 @@ title: Introduction
 
 # DarkWS
 
+These pages describe the **5.0.0 source API**. For the released **4.0.0** packages,
+select **4.x** in the version selector; use the examples for your package version.
+
 DarkWS is a small request/response protocol over WebSockets for ASP.NET Core
 and browsers. You write handler classes with attributed actions; clients call
 them by name and await typed results over one long-lived connection. The server

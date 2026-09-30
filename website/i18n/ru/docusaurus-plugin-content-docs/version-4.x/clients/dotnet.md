@@ -10,7 +10,7 @@ title: .NET-клиент
 десктопных приложениях и интеграционных тестах.
 
 ```bash
-dotnet add package DarkWS.Client
+dotnet add package DarkWS.Client --version 4.0.0
 ```
 
 ```csharp
@@ -228,7 +228,7 @@ Backpressure на сервере может задерживать `pong`, по�
 ссылается только на абстракции DI, а не на ASP.NET или Generic Host.
 
 ```bash
-dotnet add package DarkWS.Client.DependencyInjection
+dotnet add package DarkWS.Client.DependencyInjection --version 4.0.0
 ```
 
 ```csharp

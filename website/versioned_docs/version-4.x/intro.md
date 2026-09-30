@@ -6,6 +6,10 @@ title: Introduction
 
 # DarkWS
 
+This snapshot describes the released **4.0.0** API. Its installation commands pin
+NuGet packages to **4.0.0** and npm to **darkws@4**. The current documentation follows
+the **5.0.0 source API**, whose examples use different APIs.
+
 DarkWS is a small request/response protocol over WebSockets for ASP.NET Core
 and browsers. You write handler classes with attributed actions; clients call
 them by name and await typed results over one long-lived connection. The server

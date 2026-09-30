@@ -10,7 +10,7 @@ instance must reach clients connected to the others. `DarkWS.Redis` distributes
 broadcasts through Redis Pub/Sub.
 
 ```bash
-dotnet add package DarkWS.Redis
+dotnet add package DarkWS.Redis --version 4.0.0
 ```
 
 Register an `IConnectionMultiplexer`, then add Redis with an explicit channel name

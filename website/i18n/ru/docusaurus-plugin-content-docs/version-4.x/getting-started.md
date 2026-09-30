@@ -13,19 +13,19 @@ title: Начало работы
 Сервер:
 
 ```bash
-dotnet add package DarkWS
+dotnet add package DarkWS --version 4.0.0
 ```
 
 Браузерный клиент:
 
 ```bash
-npm install darkws
+npm install darkws@4
 ```
 
 .NET-клиент:
 
 ```bash
-dotnet add package DarkWS.Client
+dotnet add package DarkWS.Client --version 4.0.0
 ```
 
 ## Сервер {#server}

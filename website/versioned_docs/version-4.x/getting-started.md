@@ -13,19 +13,19 @@ browser and from .NET.
 Server:
 
 ```bash
-dotnet add package DarkWS
+dotnet add package DarkWS --version 4.0.0
 ```
 
 Browser client:
 
 ```bash
-npm install darkws
+npm install darkws@4
 ```
 
 .NET client:
 
 ```bash
-dotnet add package DarkWS.Client
+dotnet add package DarkWS.Client --version 4.0.0
 ```
 
 ## Server

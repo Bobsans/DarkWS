@@ -51,8 +51,9 @@ another language. The official clients implement all of it.
   `null` for a null value.
 - In broadcasts, `data` is omitted when the server broadcast without data or with a
   null value.
-- The envelope field names are fixed. Field names inside `data` follow the server's
-  `JsonOptions`; the default is camelCase.
+- Envelope names are fixed as `id`, `action`, `data`, and `error` by
+  `JsonPropertyName` attributes. `JsonOptions` naming policies apply to application
+  DTO properties inside `data` (camelCase by default), not to those envelope names.
 - The `invalid-request` reply to a request with a reserved id uses an empty id, so it
   cannot be mistaken for a broadcast or a control reply. A message that is not JSON,
   or has no readable string `id`, gets no reply at all.

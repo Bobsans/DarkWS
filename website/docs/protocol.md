@@ -46,7 +46,9 @@ another language. The official clients implement all of it.
 - `data` is omitted only when the server used an overload without data (`Ok()`,
   `PublishAsync(target, action)`). Overloads with data always write it, as `null` for
   a null value.
-- Field names follow the server's `JsonOptions`; the default is camelCase.
+- Envelope names are fixed as `id`, `action`, `data`, and `error` by
+  `JsonPropertyName` attributes. `JsonOptions` naming policies apply to application
+  DTO properties inside `data` (camelCase by default), not to those envelope names.
 - The `invalid-request` reply to a request with a reserved id uses an empty id, so it
   cannot be mistaken for a broadcast or a legacy control reply.
 

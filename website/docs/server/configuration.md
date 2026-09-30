@@ -118,10 +118,11 @@ Both clients also detect dead servers with their own ping/pong timeout.
 
 ## JSON
 
-`JsonOptions` controls envelopes and payloads, and is shared by all handlers. The
-defaults are web conventions: camelCase names and case-insensitive reading. Clients
-must use the same naming. The [Redis envelope](redis.md#wire-format) is independent
-of these options.
+`JsonOptions` is shared by all handlers. It uses web defaults: camelCase application
+DTO property names and case-insensitive reading. The envelope names `id`, `action`,
+`data`, and `error` are fixed by `JsonPropertyName` attributes and do not change with
+the naming policy. Clients must match the DTO schema inside `data`. The
+[Redis envelope](redis.md#wire-format) uses independent serializer settings.
 
 ## Logging
 

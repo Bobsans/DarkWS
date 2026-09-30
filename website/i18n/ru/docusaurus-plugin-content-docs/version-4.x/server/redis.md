@@ -10,7 +10,7 @@ title: Redis backplane
 `DarkWS.Redis` распространяет рассылки через Redis Pub/Sub.
 
 ```bash
-dotnet add package DarkWS.Redis
+dotnet add package DarkWS.Redis --version 4.0.0
 ```
 
 Зарегистрируйте `IConnectionMultiplexer`, затем после `AddDarkWs` добавьте Redis с явным

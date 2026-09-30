@@ -12,19 +12,44 @@ using NUnit.Framework;
 namespace DarkWS.Test;
 
 public sealed class PublicContractTests {
-    [Test]
-    public void WebSocketEnvelopesUseDataAndFlatBroadcasts() {
-        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseUpper };
-        var data = JsonSerializer.SerializeToElement(new { text = "hello" });
+    [TestCase("web", "itemCount")]
+    [TestCase("snake", "ITEM_COUNT")]
+    [TestCase("none", "ItemCount")]
+    public void WebSocketEnvelopesUseDataAndFlatBroadcasts(string naming, string dataField) {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web) {
+            PropertyNamingPolicy = naming switch {
+                "web" => JsonNamingPolicy.CamelCase,
+                "snake" => JsonNamingPolicy.SnakeCaseUpper,
+                _ => null
+            }
+        };
+        var payload = new { ItemCount = 7 };
+        var data = JsonSerializer.SerializeToElement(payload, options);
         var request = JsonSerializer.SerializeToElement(new InputMessage("1", "message:send", data), options);
         Assert.That(request.EnumerateObject().Select(property => property.Name), Is.EquivalentTo(new[] { "id", "action", "data" }));
-        Assert.That(request.GetProperty("data").GetProperty("text").GetString(), Is.EqualTo("hello"));
+        Assert.That(request.GetProperty("data").GetProperty(dataField).GetInt32(), Is.EqualTo(7));
+        var input = request.Deserialize<InputMessage>(options)!;
+        Assert.That(input.Id, Is.EqualTo("1"));
+        Assert.That(input.Action, Is.EqualTo("message:send"));
+        Assert.That(input.Payload!.Value.GetProperty(dataField).GetInt32(), Is.EqualTo(7));
 
-        var notification = JsonSerializer.SerializeToElement(new BroadcastActionMessage<JsonElement>("message:created", data), options);
+        var response = JsonSerializer.SerializeToElement(new ResponseMessage<object>("1", payload), options);
+        Assert.That(response.EnumerateObject().Select(property => property.Name), Is.EquivalentTo(new[] { "id", "data" }));
+        Assert.That(response.GetProperty("data").GetProperty(dataField).GetInt32(), Is.EqualTo(7));
+        var error = JsonSerializer.SerializeToElement(new ErrorMessage<object>("1", "denied", payload), options);
+        Assert.That(error.EnumerateObject().Select(property => property.Name), Is.EquivalentTo(new[] { "id", "error", "data" }));
+        Assert.That(error.GetProperty("error").GetString(), Is.EqualTo("denied"));
+        Assert.That(error.GetProperty("data").GetProperty(dataField).GetInt32(), Is.EqualTo(7));
+        var plainError = JsonSerializer.SerializeToElement(new ErrorMessage("1", "denied"), options);
+        Assert.That(plainError.EnumerateObject().Select(property => property.Name), Is.EquivalentTo(new[] { "id", "error" }));
+        var ok = JsonSerializer.SerializeToElement(new OkMessage("1"), options);
+        Assert.That(ok.EnumerateObject().Select(property => property.Name), Is.EqualTo(new[] { "id" }));
+
+        var notification = JsonSerializer.SerializeToElement(new BroadcastActionMessage<object>("message:created", payload), options);
         Assert.That(notification.EnumerateObject().Select(property => property.Name), Is.EquivalentTo(new[] { "id", "action", "data" }));
         Assert.That(notification.GetProperty("id").GetString(), Is.EqualTo("@"));
         Assert.That(notification.GetProperty("action").GetString(), Is.EqualTo("message:created"));
-        Assert.That(notification.GetProperty("data").GetProperty("text").GetString(), Is.EqualTo("hello"));
+        Assert.That(notification.GetProperty("data").GetProperty(dataField).GetInt32(), Is.EqualTo(7));
 
         var empty = JsonSerializer.SerializeToElement(new BroadcastActionMessage("changed"), options);
         Assert.That(empty.EnumerateObject().Select(property => property.Name), Is.EquivalentTo(new[] { "id", "action" }));
