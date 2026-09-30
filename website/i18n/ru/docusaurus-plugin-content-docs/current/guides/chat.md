@@ -95,19 +95,30 @@ public sealed record SendInput(string Text);
 ```csharp
 public sealed class PresenceHooks(IBroadcaster broadcaster) : DarkWsConnectionHooks {
     public override Task OnOpenAsync(IDarkWsContextAccessor context) =>
-        Announce(context, "chat:joined");
+        Announce(context, context.Session as ChatSession, "chat:joined");
+
+    public override async Task OnAuthenticatedAsync(IDarkWsContextAccessor context, IDarkWsSession? previousSession) {
+        if (previousSession?.Id == context.Session?.Id) return;
+        await Announce(context, previousSession as ChatSession, "chat:left");
+        await Announce(context, context.Session as ChatSession, "chat:joined");
+    }
 
     public override Task OnCloseAsync(IDarkWsContextAccessor context) =>
-        Announce(context, "chat:left");
+        Announce(context, context.Session as ChatSession, "chat:left");
 
-    private Task Announce(IDarkWsContextAccessor context, string action) =>
-        context.Session is ChatSession session
+    private Task Announce(IDarkWsContextAccessor context, ChatSession? session, string action) =>
+        session is not null
             ? broadcaster.PublishAsync(
                 BroadcastTarget.Group("chat").ExceptConnection(context.Connection.Id),
                 action, new { session.Name }, context.ConnectionAborted)
             : Task.CompletedTask;
 }
 ```
+
+Присутствие учитывает и аутентификацию при upgrade, и последующий браузерный
+`authenticationToken`. Logout объявляет уход прежней сессии, замена — уход перед
+приходом новой. Анонимные подключения не порождают событий, повторное использование
+той же сессии не объявляет второй приход.
 
 ## Program {#program}
 
@@ -185,7 +196,7 @@ chat.connect();
 
 ```html
 <ul id="messages"></ul>
-<form id="send"><input autocomplete="off" required><button>Send</button></form>
+<form id="send"><input aria-label="Message" autocomplete="off" required><button>Send</button></form>
 ```
 
 Перезагрузка истории при каждом `open` покрывает рассылки, пропущенные во время разрыва соединения.

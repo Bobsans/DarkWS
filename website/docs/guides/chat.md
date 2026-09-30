@@ -95,19 +95,30 @@ Connection hooks announce joins and leaves:
 ```csharp
 public sealed class PresenceHooks(IBroadcaster broadcaster) : DarkWsConnectionHooks {
     public override Task OnOpenAsync(IDarkWsContextAccessor context) =>
-        Announce(context, "chat:joined");
+        Announce(context, context.Session as ChatSession, "chat:joined");
+
+    public override async Task OnAuthenticatedAsync(IDarkWsContextAccessor context, IDarkWsSession? previousSession) {
+        if (previousSession?.Id == context.Session?.Id) return;
+        await Announce(context, previousSession as ChatSession, "chat:left");
+        await Announce(context, context.Session as ChatSession, "chat:joined");
+    }
 
     public override Task OnCloseAsync(IDarkWsContextAccessor context) =>
-        Announce(context, "chat:left");
+        Announce(context, context.Session as ChatSession, "chat:left");
 
-    private Task Announce(IDarkWsContextAccessor context, string action) =>
-        context.Session is ChatSession session
+    private Task Announce(IDarkWsContextAccessor context, ChatSession? session, string action) =>
+        session is not null
             ? broadcaster.PublishAsync(
                 BroadcastTarget.Group("chat").ExceptConnection(context.Connection.Id),
                 action, new { session.Name }, context.ConnectionAborted)
             : Task.CompletedTask;
 }
 ```
+
+Presence handles both upgrade authentication and the browser's post-connect
+`authenticationToken` flow. Logout announces the old session's departure;
+replacement announces departure before arrival. Anonymous connections emit neither
+event, and reusing the same session does not announce a second join.
 
 ## Program
 
@@ -185,7 +196,7 @@ chat.connect();
 
 ```html
 <ul id="messages"></ul>
-<form id="send"><input autocomplete="off" required><button>Send</button></form>
+<form id="send"><input aria-label="Message" autocomplete="off" required><button>Send</button></form>
 ```
 
 Reloading history on every `open` covers broadcasts missed while disconnected.

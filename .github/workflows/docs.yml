@@ -42,6 +42,13 @@ jobs:
       - name: Audit site dependencies
         run: npm audit --prefix website
 
+      - name: Install browser SDK test tools
+        run: npm ci --prefix packages/darkws
+
+      - name: Verify runnable documentation examples
+        shell: pwsh
+        run: ./scripts/test-docs.ps1
+
       - name: Generate .NET API reference
         shell: pwsh
         run: ./scripts/docs-api.ps1

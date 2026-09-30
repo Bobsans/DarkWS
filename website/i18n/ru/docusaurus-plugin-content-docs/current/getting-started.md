@@ -43,8 +43,6 @@ builder.Services
 
 var app = builder.Build();
 
-app.UseAuthentication();
-app.UseAuthorization();
 app.UseWebSockets(new WebSocketOptions { AllowedOrigins = { "https://app.example.com" } });
 app.MapDarkWs("/ws");
 

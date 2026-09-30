@@ -95,6 +95,13 @@ Run `npm ci --prefix website`, `npm audit --prefix website`,
 `pwsh ./scripts/docs-api.ps1`, and `npm run build --prefix website` after changing
 the website lockfile. The build generates the TypeDoc reference and both locales.
 
+Run `npm ci --prefix packages/darkws` and `pwsh ./scripts/test-docs.ps1` to check
+the actual quickstart/chat C# blocks from both locales and versions. Temporary
+consumers use current project sources or NuGet/npm 4.0.0 for the 4.x snapshot.
+Real loopback sockets and the browser SDK check startup, presence, reconnect,
+logout/replacement, and anonymous connections; the HTML input name is checked too.
+Docs CI runs this gate before generating and building the site.
+
 The website overrides `serialize-javascript` to 7.0.5 for the CommonJS consumers
 `copy-webpack-plugin` and `css-minimizer-webpack-plugin`. Its Node >=20 requirement
 matches Docusaurus 3.10.2 and the site's engine; CI uses Node 24. This fixes

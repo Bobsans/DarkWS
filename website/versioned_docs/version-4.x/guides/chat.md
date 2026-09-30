@@ -211,7 +211,7 @@ chat.connect();
 
 ```html
 <ul id="messages"></ul>
-<form id="send"><input autocomplete="off" required><button>Send</button></form>
+<form id="send"><input aria-label="Message" autocomplete="off" required><button>Send</button></form>
 ```
 
 The `message` event receives every broadcast as the full envelope
