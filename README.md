@@ -111,8 +111,11 @@ Full numbers and methodology: [Performance](https://bobsans.github.io/DarkWS/per
 | Line coverage | 94.9–100% per package, gated at 90% |
 | Branch coverage | 93.1–100% per package, gated at 80% |
 | Redis | Integration tests against real Redis, StackExchange.Redis 2.13 and 3.2 |
-| Packages | Every NuGet and npm package is packed, installed into a clean project, and run in CI |
+| Packages | NuGet: clean installed-consumer smoke tests. npm: clean prepack build and required tarball file checks |
 | Public API | Tracked with PublicApiAnalyzers; breaking changes only in major versions |
+
+The npm package gate checks the packaged `dist` files and declarations. It does not
+install the tarball or test package-name resolution through its exports/types.
 
 ## Packages
 
