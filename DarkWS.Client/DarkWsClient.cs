@@ -108,8 +108,8 @@ public sealed partial class DarkWsClient : IDarkWsClient {
                 var establishing = true;
                 var receive = Task.CompletedTask;
                 var heartbeat = Task.CompletedTask;
+                using var attemptTimeout = CancellationTokenSource.CreateLinkedTokenSource(connection.Token);
                 try {
-                    using var attemptTimeout = CancellationTokenSource.CreateLinkedTokenSource(connection.Token);
                     attemptTimeout.CancelAfter(_options.ConnectionTimeout);
                     var token = attemptTimeout.Token;
                     if (_options.ConfigureWebSocketOptionsAsync is { } configure) {
@@ -127,8 +127,20 @@ public sealed partial class DarkWsClient : IDarkWsClient {
                     if (_options.AuthenticationTokenProvider is { } provider && AutomaticAuthenticationEnabled()) {
                         string? authenticationToken;
                         try {
-                            authenticationToken = await provider(token).AsTask().WaitAsync(token).ConfigureAwait(false);
+                            var acquisition = provider(token).AsTask();
+                            Observe(acquisition);
+                            await Task.WhenAny(acquisition, receive).WaitAsync(token).ConfigureAwait(false);
+                            if (receive.IsCompleted) {
+                                await receive.ConfigureAwait(false);
+                            }
+
+                            authenticationToken = await acquisition.WaitAsync(token).ConfigureAwait(false);
                         } catch (Exception) when (!token.IsCancellationRequested) {
+                            // Preserve the receiver's failure instead of treating it as a provider error.
+                            if (receive.IsCompleted) {
+                                await receive.ConfigureAwait(false);
+                            }
+
                             permanent = true;
                             throw new DarkWsConnectionException("Authentication token provider failed.");
                         }
@@ -177,6 +189,7 @@ public sealed partial class DarkWsClient : IDarkWsClient {
                         await CloseOutputAsync(connection, protocol.CloseStatus).ConfigureAwait(false);
                     }
                 } finally {
+                    await attemptTimeout.CancelAsync().ConfigureAwait(false);
                     connection.Stop();
                     while (_notifications.Reader.TryRead(out _)) { }
 

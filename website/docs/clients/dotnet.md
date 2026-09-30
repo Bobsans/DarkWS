@@ -139,6 +139,11 @@ a provider exception, or `auth:failed` is a permanent readiness failure: the sta
 becomes `Disconnected` with the reason, and automatic retries stop. Fix the cause and
 call `ConnectAsync`.
 
+Malformed, binary, or oversized messages received while the token provider is
+pending also fail readiness immediately with `DarkWsProtocolException`. The
+provider is canceled, the protocol close status is preserved, and automatic
+reconnect stops; ordinary transport failures remain retryable.
+
 Starting `LogoutAsync` disables the provider, even if the acknowledgement is lost.
 A logout rejected by `MaxPendingRequests` has not started and leaves it enabled.
 Only an `AuthenticateAsync` invoked after that logout can re-enable it on success;

@@ -563,6 +563,41 @@ public sealed class ClientTests {
         Assert.That(await failure.Task.WaitAsync(TimeSpan.FromSeconds(5)), Is.TypeOf<DarkWsTimeoutException>());
     }
 
+    [TestCase("{", WebSocketMessageType.Text, 1024, WebSocketCloseStatus.ProtocolError)]
+    [TestCase("{}", WebSocketMessageType.Binary, 1024, WebSocketCloseStatus.InvalidMessageType)]
+    [TestCase("{}", WebSocketMessageType.Text, 1, WebSocketCloseStatus.MessageTooBig)]
+    public async Task ProtocolFailureDuringTokenAcquisitionIsTerminal(string text, WebSocketMessageType type, int limit, WebSocketCloseStatus status) {
+        await using var server = await TestServer.StartAsync();
+        var started = Completion<bool>();
+        var cancelled = Completion<bool>();
+        await using var client = Client(server, options => {
+            options.Reconnect = true;
+            options.ConnectionTimeout = TimeSpan.FromSeconds(10);
+            options.MaxMessageSizeBytes = limit;
+            options.AuthenticationTokenProvider = async token => {
+                started.TrySetResult(true);
+                try {
+                    await Task.Delay(Timeout.Infinite, token);
+                    return "valid";
+                } finally {
+                    cancelled.TrySetResult(token.IsCancellationRequested);
+                }
+            };
+        });
+        var connect = client.ConnectAsync();
+        var socket = await server.AcceptAsync();
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await socket.SendAsync(Encoding.UTF8.GetBytes(text), type, true, CancellationToken.None);
+        var failure = await Assert.ThrowsAsync<DarkWsProtocolException>(async () => await connect.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.That(failure!.CloseStatus, Is.EqualTo(status));
+        Assert.That(await TestServer.ReadAsync(socket), Is.EqualTo("close"));
+        Assert.That(socket.CloseStatus, Is.EqualTo(status));
+        Assert.That(await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(3)), Is.True);
+        Assert.That(client.State, Is.EqualTo(DarkWsClientState.Disconnected));
+        await Task.Delay(1100);
+        Assert.That(server.Connections, Is.EqualTo(1));
+    }
+
     [Test]
     public async Task TransportFailureDuringAutomaticAuthenticationReconnects() {
         await using var server = await TestServer.StartAsync();
