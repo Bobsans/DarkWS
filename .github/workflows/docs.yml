@@ -1,9 +1,30 @@
 name: Docs
 
+# Only changes to what the site is built from: its pages, the .NET API reference (XML docs of
+# the packages), the TypeScript reference and smoke tests (browser SDK), and the build itself.
 on:
   push:
     branches: [main]
+    paths: &site-inputs
+      - website/**
+      - assets/**
+      - packages/darkws/src/**
+      - packages/darkws/package.json
+      - packages/darkws/tsconfig.json
+      - DarkWS/**
+      - DarkWS.Redis/**
+      - DarkWS.Client/**
+      - DarkWS.Client.DependencyInjection/**
+      - DarkWS.Testing/**
+      - Directory.Build.props
+      - Directory.Build.targets
+      - global.json
+      - scripts/docs-api.ps1
+      - scripts/test-docs.ps1
+      - scripts/docs-smoke/**
+      - .github/workflows/docs.yml
   pull_request:
+    paths: *site-inputs
   workflow_dispatch:
 
 permissions:
