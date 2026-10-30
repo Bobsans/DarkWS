@@ -109,3 +109,20 @@ title: Обновление до 5.0
   `KeepSessionOnFailedAuthentication` и `AcceptAnonymousOnUpgradeAuthenticationException`.
 - Браузер: `authenticationToken`, `sessionRestoreFailed`, повторы, `requestOptions`,
   `onAction`, `DarkWs.lazy()`, `isCurrentSocket` и `reconnectOnVisible`.
+
+## С 5.0 на 5.1 {#from-50-to-51}
+
+5.1 добавляет API и не меняет сигнатуры. Проверьте изменения поведения:
+
+- `HandlerBase.Session` без сессии выбрасывает `ErrorResponseException` с
+  `AuthorizationRequiredError`, а не `InvalidOperationException`. В
+  `[AllowAnonymous]`-действиях для обоих видов вызова используйте `SessionOrDefault`.
+- Исключения аутентификатора и непредвиденные сбои действий логируются на уровне `Error`.
+- Цель `Connection` на этом экземпляре, включая `Self`, минует backplane, а
+  `PublishAsync` завершается после записи в сокет.
+- Браузер: `requestTimeout` по умолчанию 60 с. Чтобы оставить 5 минут, задайте
+  `requestTimeout: 300000` или увеличьте срок по действиям через `requestOptions`.
+- Браузер: `reconnect()` заменяет сокет, который ещё подключается.
+
+Новое: параметр действия `CancellationToken`, `SessionOrDefault`,
+`DarkWsActionInfo.HasAttribute<T>()` и `DarkWsTestHost.RequestAsync`.

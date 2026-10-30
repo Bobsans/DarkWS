@@ -1,5 +1,7 @@
 using DarkWS.Abstractions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace DarkWS;
 
@@ -10,9 +12,12 @@ public abstract class HandlerBase {
     /// <summary>Gets the current message scope's service provider.</summary>
     protected IServiceProvider Services => Context.Services;
 
-    /// <summary>Gets the required handler session. Throws InvalidOperationException for an anonymous connection or incompatible typed session.</summary>
+    /// <summary>Gets the required handler session. Without one, throws ErrorResponseException with DarkWsOptions.AuthorizationRequiredError, which the client receives as that error.</summary>
     protected IDarkWsSession Session => Context.Session
-        ?? throw new InvalidOperationException("This handler requires an authenticated session");
+        ?? throw new ErrorResponseException(Services.GetRequiredService<IOptions<DarkWsOptions>>().Value.AuthorizationRequiredError);
+
+    /// <summary>Gets the session the action was authorized with, or null for an anonymous caller of an [AllowAnonymous] action.</summary>
+    protected IDarkWsSession? SessionOrDefault => Context.Session;
 
     /// <summary>Gets the HTTP upgrade context shared by the connection. Not thread-safe: concurrent actions of the connection share it.</summary>
     protected HttpContext HttpContext => Context.HttpContext;
@@ -69,7 +74,13 @@ public abstract class HandlerBase {
 /// <summary>Base for per-message handlers. Context-dependent members are available only during action invocation.</summary>
 public abstract class HandlerBase<TSession> : HandlerBase
     where TSession : class, IDarkWsSession {
-    /// <summary>Gets the required handler session. Throws InvalidOperationException for an anonymous connection or incompatible typed session.</summary>
-    protected new TSession Session => base.Session as TSession
-        ?? throw new InvalidOperationException($"Expected session type {typeof(TSession).FullName}");
+    /// <summary>Gets the required handler session. Without one, throws ErrorResponseException with DarkWsOptions.AuthorizationRequiredError; an incompatible session type throws InvalidOperationException.</summary>
+    protected new TSession Session => Cast(base.Session);
+
+    /// <summary>Gets the typed session, or null for an anonymous caller. An incompatible session type throws InvalidOperationException.</summary>
+    protected new TSession? SessionOrDefault => base.SessionOrDefault is { } session ? Cast(session) : null;
+
+    private static TSession Cast(IDarkWsSession session) {
+        return session as TSession ?? throw new InvalidOperationException($"Expected session type {typeof(TSession).FullName}");
+    }
 }

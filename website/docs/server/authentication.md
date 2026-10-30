@@ -117,7 +117,7 @@ your authenticator decides from the HTTP request alone.
 | --- | --- |
 | A session | Connection opens authenticated |
 | `null` | Connection opens anonymous |
-| Throws | Logged as a warning; HTTP 401, no socket |
+| Throws | Logged as an error; HTTP 401, no socket |
 
 Set `AcceptAnonymousOnUpgradeAuthenticationException = true` to accept the socket
 anonymously when the authenticator throws. Request and shutdown cancellation is never

@@ -8,7 +8,7 @@ public class HandlerAttribute(string name) : Attribute {
     public string Name { get; } = name;
 }
 
-/// <summary>Exposes a declared public instance method returning IResponse or Task of IResponse with zero or one payload parameter.</summary>
+/// <summary>Exposes a declared public instance method returning IResponse or Task of IResponse with zero or one payload parameter and an optional CancellationToken, which receives ConnectionAborted.</summary>
 /// <param name="name">Wire name or prefix.</param>
 [AttributeUsage(AttributeTargets.Method)]
 public class ActionAttribute(string name) : Attribute {

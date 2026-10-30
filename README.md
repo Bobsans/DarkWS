@@ -1,4 +1,6 @@
-<img src="assets/icon.svg" alt="DarkWS" width="128" align="right">
+<div align="center">
+
+<img src="assets/icon.svg" alt="DarkWS logo" width="128">
 
 # DarkWS
 
@@ -14,14 +16,16 @@
 **Typed request/response and real-time broadcasts over WebSockets for ASP.NET Core
 and the browser.**
 
-Write a handler, call it from the browser, await the result. Push updates to one
-user, a group, or everyone, on one server or a cluster. No hubs, no negotiation
-endpoint, no code generation: plain JSON over one socket.
-
 **[Documentation](https://bobsans.github.io/DarkWS/)** ·
 **[Документация на русском](https://bobsans.github.io/DarkWS/ru/)** ·
 [Getting started](https://bobsans.github.io/DarkWS/getting-started) ·
 [Build a chat](https://bobsans.github.io/DarkWS/guides/chat)
+
+</div>
+
+Write a handler, call it from the browser, await the result. Push updates to one
+user, a group, or everyone, on one server or a cluster. No hubs, no negotiation
+endpoint, no code generation: plain JSON over one socket.
 
 ## In 30 seconds
 

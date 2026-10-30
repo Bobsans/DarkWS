@@ -140,7 +140,23 @@ public sealed class GroupBroadcastTests {
         Assert.That(custom.Calls, Is.EqualTo(new[] { "b", "c" }));
     }
 
+    [Test]
+    public async Task LocalSelfBroadcastIsDeliveredAndRecorded() {
+        await using var host = new DarkWsTestHost(_ => { });
+        var connection = host.CreateConnection(new HandlerTestingTests.TestSession("session", ["a"]));
+        await using var scope = host.CreateScope(connection);
+        var handler = new GroupHandler();
+        scope.Initialize(handler);
+        await handler.ToSelf();
+        Assert.That(connection.SentMessages, Has.Count.EqualTo(1));
+        var broadcast = host.Broadcasts.Single();
+        Assert.That(broadcast.TargetType, Is.EqualTo(BroadcastTargetType.Connection));
+        Assert.That(broadcast.TargetId, Is.EqualTo(connection.Id));
+        Assert.That(broadcast.Action, Is.EqualTo("self"));
+    }
+
     private sealed class GroupHandler : HandlerBase {
+        public Task ToSelf() => PublishAsync(Self, "self", 1);
         public Task Single() => PublishAsync(BroadcastTarget.Group("a").ExceptConnection(Connection.Id), "single");
         public Task SingleData(BroadcastTarget target) => PublishAsync<string?>(target, "single-data", null);
         public Task Many() => PublishAsync(BroadcastTarget.Groups(["a", "a"]), "many");

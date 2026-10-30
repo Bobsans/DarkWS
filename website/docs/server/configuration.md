@@ -127,5 +127,6 @@ the naming policy. Clients must match the DTO schema inside `data`. The
 ## Logging
 
 - Successful actions and malformed client requests are logged at `Debug`.
-- Unexpected handler failures and upgrade authentication failures are warnings.
+- Unexpected handler failures and exceptions thrown by the authenticator, on upgrade
+  or on `auth:`, are errors. A rejected token (a null session) is not logged.
 - Handler exception messages are logged, never sent to clients.

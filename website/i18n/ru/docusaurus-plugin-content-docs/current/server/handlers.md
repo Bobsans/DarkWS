@@ -15,8 +15,8 @@ using DarkWS;
 [Handler("message")]
 public sealed class MessageHandler(MessageService messages) : HandlerBase {
     [Action("get")]
-    public async Task<IResponse> GetAsync(Guid id) {
-        var message = await messages.FindAsync(id, ConnectionAborted);
+    public async Task<IResponse> GetAsync(Guid id, CancellationToken cancellationToken) {
+        var message = await messages.FindAsync(id, cancellationToken);
         return message is null ? Error("message:not-found") : Ok(message);
     }
 
@@ -48,8 +48,9 @@ builder.Services
   Унаследованные методы не сканируются: объявите или переопределите действие в конкретном
   обработчике и пометьте его `[Action]`.
 - Действие возвращает строго `IResponse` или `Task<IResponse>`.
-- Действие принимает ноль или один параметр payload. Обобщённые методы, а также параметры,
-  передаваемые по ссылке, byref-like-параметры и указатели отклоняются.
+- Действие принимает ноль или один параметр payload и, в любой позиции, не более одного
+  `CancellationToken`, который получает `ConnectionAborted`. Обобщённые методы, а также
+  параметры, передаваемые по ссылке, byref-like-параметры и указатели отклоняются.
 - Сканирование сборки регистрирует только обработчики. Фильтры, инициализаторы и хуки
   регистрируются явно.
 
@@ -64,7 +65,8 @@ builder.Services
 | Член | Значение |
 | --- | --- |
 | `Connection` | Текущее `IWebSocketConnection` (`Id`, `Session`, `IsOpen`, `CloseAsync`, `Abort`) |
-| `Session` | Аутентифицированная сессия; для анонимного соединения выбрасывает исключение |
+| `Session` | Сессия, с которой действие авторизовано; для анонимного вызова `[AllowAnonymous]`-действия выбрасывает `ErrorResponseException` с `AuthorizationRequiredError` |
+| `SessionOrDefault` | Та же сессия или null для анонимного вызова |
 | `HttpContext` | `HttpContext` upgrade-запроса, общий для всего соединения |
 | `AspNetSession` | ASP.NET `ISession`, если установлен middleware сессий, иначе null |
 | `ConnectionAborted` | Отменяется при остановке соединения; передавайте его в асинхронную работу |
@@ -127,7 +129,7 @@ if (!await permissions.CanEditAsync(Session.UserId, id)) {
 throw new ErrorResponseException<ValidationDetails>("message:invalid", details);
 ```
 
-Любое другое исключение логируется как предупреждение, и на него отвечается
+Любое другое исключение логируется как ошибка, и на него отвечается
 `darkws:error:request-failed`. Его сообщение никогда не отправляется клиенту. Чтобы создать
 собственный тип исключения с ответом протокола, унаследуйтесь от `DarkWsException` и
 реализуйте `GetResponse()`.

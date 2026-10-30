@@ -42,6 +42,7 @@ public sealed class HandlerTestingTests {
     [TestCase("testing:controlled", "null", "domain:error")]
     [TestCase("testing:throws", "null", "failed")]
     [TestCase("testing:blocked", "null", "blocked")]
+    [TestCase("testing:anonymous-session", "null", "auth")]
     public async Task PipelineUsesConfiguredErrorsAndFilterShortCircuit(string action, string json, string expected) {
         await using var host = CreateHost(options => {
             options.AuthorizationRequiredError = "auth";
@@ -74,6 +75,31 @@ public sealed class HandlerTestingTests {
         using var invalid = JsonDocument.Parse(authenticated.SentMessages.Last());
         Assert.That(invalid.RootElement.GetProperty("error").GetString(), Is.EqualTo("darkws:error:invalid-request"));
         Assert.That(invalid.RootElement.GetProperty("id").GetString(), Is.Empty);
+    }
+
+    [Test]
+    public async Task RequestAsyncReturnsTheMatchingResponseAndActionsReceiveTheirToken() {
+        await using var host = CreateHost();
+        var connection = host.CreateConnection(new TestSession("user", []));
+        var broadcast = await host.RequestAsync(connection, "testing:broadcast");
+        Assert.That(connection.SentMessages, Has.Count.EqualTo(2));
+        Assert.That(broadcast!.Value.GetProperty("id").GetString(), Is.Not.EqualTo(DarkWsProtocol.BroadcastId));
+        Assert.That(broadcast.Value.TryGetProperty("action", out _), Is.False);
+
+        using var request = new CancellationTokenSource();
+        var token = await host.RequestAsync(connection, "testing:token", JsonSerializer.SerializeToElement(new { value = "hello" }), request.Token);
+        Assert.That(token!.Value.GetProperty("data").EnumerateArray().Select(it => it.GetString()), Is.EqualTo(new[] { "hello", "True" }));
+
+        var anonymous = host.CreateConnection();
+        var optional = await host.RequestAsync(anonymous, "testing:optional-session");
+        Assert.That(optional!.Value.GetProperty("data").ValueKind, Is.EqualTo(JsonValueKind.Null));
+        Assert.That((await host.RequestAsync(connection, "testing:optional-session"))!.Value.GetProperty("data").GetString(), Is.EqualTo("user"));
+
+        using var cancellation = new CancellationTokenSource();
+        var pending = host.RequestAsync(connection, "testing:wait", cancellationToken: cancellation.Token);
+        await host.Services.GetRequiredService<Probe>().Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cancellation.Cancel();
+        Assert.That(await pending.WaitAsync(TimeSpan.FromSeconds(10)), Is.Null);
     }
 
     [Test]
@@ -234,6 +260,13 @@ public sealed class HandlerTestingTests {
             await Task.Delay(Timeout.InfiniteTimeSpan, ConnectionAborted);
             return Ok();
         }
+        [Action("anonymous-session"), AllowAnonymous]
+        public IResponse AnonymousSession() => Ok(Session.Id);
+        [Action("optional-session"), AllowAnonymous]
+        public IResponse OptionalSession() => Ok(SessionOrDefault?.Id);
+        [Action("token"), AllowAnonymous]
+        public IResponse Token(CancellationToken cancellationToken, Payload payload) =>
+            Ok(new[] { payload.Value, (cancellationToken == ConnectionAborted && cancellationToken.CanBeCanceled).ToString() });
     }
 
     public sealed class DirectHandler : HandlerBase {

@@ -75,6 +75,11 @@ cancelled token throws before publishing.
   delivery that has started.
 - **Completion**: with the in-memory backplane `PublishAsync` completes after local
   delivery; with Redis it completes when Redis accepts the message.
+- **Local connection targets**: a `Connection` target (including `Self`) whose
+  connection is on this instance skips the backplane. `PublishAsync` then completes
+  after the socket write, bounded by `BroadcastSendTimeout`, so a handler that awaits
+  it delivers the notification before its own response. An id that is not local goes
+  through the backplane, because the connection may live on another instance.
 - **No replay**: a client that is disconnected misses the broadcast. Treat
   broadcasts as change notifications and have clients reload state after reconnecting.
 
@@ -107,8 +112,8 @@ connections on every instance.
 
 ## Backplanes
 
-The broadcaster hands every message to an `IDarkWsBackplane`, which delivers it to
-each server instance. The default in-memory backplane serves one instance.
+The broadcaster hands every message, except one for a local connection target, to an
+`IDarkWsBackplane`, which delivers it to each server instance. The default in-memory backplane serves one instance.
 For several instances, use the [Redis backplane](redis.md). Handler code does not
 change when the backplane changes.
 

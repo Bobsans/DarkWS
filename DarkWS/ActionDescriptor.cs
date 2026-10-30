@@ -25,7 +25,7 @@ internal abstract class ActionDescriptorBase(
         return parameter;
     }
 
-    public abstract ValueTask<IResponse> InvokeAsync(object handler, object? parameter);
+    public abstract ValueTask<IResponse> InvokeAsync(object handler, object? parameter, CancellationToken cancellationToken);
 }
 
 internal sealed class ActionDescriptor(
@@ -33,10 +33,10 @@ internal sealed class ActionDescriptor(
     Type? parameterType,
     bool allowAnonymous,
     bool allowsNullPayload,
-    Func<object, object?, IResponse> handler
+    Func<object, object?, CancellationToken, IResponse> handler
 ) : ActionDescriptorBase(action, parameterType, allowAnonymous, allowsNullPayload) {
-    public override ValueTask<IResponse> InvokeAsync(object instance, object? parameter) {
-        return ValueTask.FromResult(handler(instance, parameter));
+    public override ValueTask<IResponse> InvokeAsync(object instance, object? parameter, CancellationToken cancellationToken) {
+        return ValueTask.FromResult(handler(instance, parameter, cancellationToken));
     }
 }
 
@@ -45,9 +45,9 @@ internal sealed class AsyncActionDescriptor(
     Type? parameterType,
     bool allowAnonymous,
     bool allowsNullPayload,
-    Func<object, object?, Task<IResponse>> handler
+    Func<object, object?, CancellationToken, Task<IResponse>> handler
 ) : ActionDescriptorBase(action, parameterType, allowAnonymous, allowsNullPayload) {
-    public override async ValueTask<IResponse> InvokeAsync(object instance, object? parameter) {
-        return await handler(instance, parameter);
+    public override async ValueTask<IResponse> InvokeAsync(object instance, object? parameter, CancellationToken cancellationToken) {
+        return await handler(instance, parameter, cancellationToken);
     }
 }

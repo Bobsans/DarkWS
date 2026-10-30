@@ -82,6 +82,7 @@ public sealed class RegistrationTests {
     }
 
     [TestCase(typeof(TwoParameters), "zero or one")]
+    [TestCase(typeof(TwoTokens), "at most one CancellationToken")]
     [TestCase(typeof(ValueTaskReturn), "IResponse or Task<IResponse>")]
     [TestCase(typeof(VoidReturn), "IResponse or Task<IResponse>")]
     [TestCase(typeof(GenericMethod), "generic")]
@@ -138,6 +139,11 @@ public sealed class RegistrationTests {
     public abstract class TwoParameters : HandlerBase {
         [Action("invalid")]
         public IResponse Invalid(int first, int second) => Ok(first + second);
+    }
+
+    public abstract class TwoTokens : HandlerBase {
+        [Action("invalid")]
+        public IResponse Invalid(CancellationToken first, CancellationToken second) => Ok();
     }
 
     public abstract class ValueTaskReturn : HandlerBase {

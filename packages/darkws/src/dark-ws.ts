@@ -163,7 +163,8 @@ export default class DarkWs {
       reconnect: options.reconnect ?? true,
       reconnectTimeout: options.reconnectTimeout ?? 5000,
       reconnectOnVisible: options.reconnectOnVisible ?? false,
-      requestTimeout: options.requestTimeout ?? 300000,
+      // A minute clears slow legitimate actions; a lost reply must not leave a screen empty for longer.
+      requestTimeout: options.requestTimeout ?? 60000,
       pongTimeout: options.pongTimeout ?? 30000,
       waitConnectionTimeout: options.waitConnectionTimeout ?? 30000,
       debug: options.debug ?? false,
@@ -213,7 +214,7 @@ export default class DarkWs {
   public connect(): this {
     this.assertNotDisposed();
     this.closedByClient = false;
-    // An open or opening socket is kept; close() or reconnect() replaces it deliberately.
+    // An open or opening socket is kept; reconnect() replaces an opening one deliberately.
     if (this.socket && (
       this.socket.readyState === WebSocket.OPEN ||
       this.socket.readyState === WebSocket.CONNECTING
@@ -230,16 +231,21 @@ export default class DarkWs {
     return this.openConnection();
   }
 
+  /** Connects now, skipping a pending backoff. An open socket is kept; one still connecting is replaced. */
   public reconnect(): void {
     this.assertNotDisposed();
-    if (this.socket && (
-      this.socket.readyState === WebSocket.OPEN ||
-      this.socket.readyState === WebSocket.CONNECTING
-    )) {
+    if (this.socket?.readyState === WebSocket.OPEN) {
       return;
     }
     this.reconnectAttempts = 0;
     this.clearReconnectTimer();
+    // A connect attempt can hang for half a minute when its packets were dropped, as Android does for a
+    // background page. Requests waiting for the connection go out on the new socket.
+    const stale = this.socket?.readyState === WebSocket.CONNECTING ? this.socket : undefined;
+    if (stale) {
+      this.socket = undefined;
+      stale.close();
+    }
     this.connect();
   }
 

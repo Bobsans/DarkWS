@@ -26,4 +26,9 @@ public sealed class DarkWsActionInfo {
 
     /// <summary>Gets attributes on the handler class, including inherited attributes, collected once at registration.</summary>
     public IReadOnlyList<Attribute> HandlerAttributes { get; }
+
+    /// <summary>Returns whether the action method or its handler class carries an attribute of this type, including inherited and derived attributes.</summary>
+    public bool HasAttribute<T>() where T : Attribute {
+        return Attributes.OfType<T>().Any() || HandlerAttributes.OfType<T>().Any();
+    }
 }

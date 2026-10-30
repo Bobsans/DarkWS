@@ -35,6 +35,9 @@ public sealed class ActionFilterTests {
             Assert.That(probe.Action?.Attributes.OfType<FilterMarkerAttribute>().Any(), Is.True);
             Assert.That(probe.Action?.HandlerAttributes.OfType<FilterMarkerAttribute>().Any(), Is.True);
             Assert.That(probe.Action?.HandlerAttributes.OfType<HandlerAttribute>().Single().Name, Is.EqualTo("filters"));
+            Assert.That(probe.Action?.HasAttribute<HandlerAttribute>(), Is.True);
+            Assert.That(probe.Action?.HasAttribute<ActionAttribute>(), Is.True);
+            Assert.That(probe.Action?.HasAttribute<ObsoleteAttribute>(), Is.False);
             Assert.That(probe.Payload, Is.EqualTo("hello"));
             Assert.That(probe.RequestId, Is.EqualTo("run"));
             Assert.That(probe.RawPayload, Is.EqualTo("\"hello\""));

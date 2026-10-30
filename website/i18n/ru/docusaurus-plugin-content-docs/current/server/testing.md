@@ -41,6 +41,16 @@ Assert.That(response.RootElement.GetProperty("data").GetString(), Is.EqualTo("he
 конструктора настраивает `DarkWsOptions`, например `options => options.AllowNullPayloads = true`.
 `host.Services` — корневой провайдер сервисов.
 
+`RequestAsync` делает то же самое и возвращает конверт ответа, найденный по
+идентификатору запроса, поэтому рассылки, которые действие шлёт подключению, не мешают:
+
+```csharp
+var response = await host.RequestAsync(connection, "message:echo", JsonSerializer.SerializeToElement("hello"));
+Assert.That(response!.Value.GetProperty("data").GetString(), Is.EqualTo("hello"));
+```
+
+Метод возвращает null, если вызов завершился без ответа, как бывает при отмене.
+
 ## Аутентифицированные вызовы {#authenticated-calls}
 
 Передайте сессию в `CreateConnection`. Её principal должен быть аутентифицирован

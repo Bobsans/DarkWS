@@ -1,1 +1,2 @@
 #nullable enable
+DarkWS.Testing.DarkWsTestHost.RequestAsync(DarkWS.Testing.DarkWsTestConnection! connection, string! action, System.Text.Json.JsonElement? data = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Text.Json.JsonElement?>!

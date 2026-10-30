@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Security.Claims;
 using System.Text.Json;
@@ -105,13 +106,81 @@ public sealed class BroadcastTests {
     }
 
     [Test]
-    public async Task TimedOutBroadcastAbortsConnectionAsync() {
+    public async Task LocalConnectionTargetSkipsBackplaneAsync() {
+        var backplane = new RecordingBackplane();
+        using var host = CreateHost(backplane: backplane);
+        await host.StartAsync();
+        var socket = new TestWebSocket();
+        var connection = CreateConnection(socket, "one");
+        host.Services.GetRequiredService<ConnectionStorage>().Add(connection);
+
+        await host.Services.GetRequiredService<IBroadcaster>()
+            .PublishAsync(BroadcastTarget.Connection(connection.Id), "private", new { Value = 1 });
+
+        Assert.That(ReadAction(socket), Is.EqualTo("private"));
+        Assert.That(backplane.Published, Is.Empty);
+        await host.StopAsync();
+    }
+
+    [Test]
+    public async Task LocalConnectionSendsTheSameBytesAsBackplaneDeliveryAsync() {
+        using var host = CreateHost();
+        await host.StartAsync();
+        var socket = new TestWebSocket();
+        var connection = CreateConnection(socket, "one");
+        host.Services.GetRequiredService<ConnectionStorage>().Add(connection);
+        var broadcaster = host.Services.GetRequiredService<IBroadcaster>();
+        BroadcastTarget[] targets = [BroadcastTarget.Connection(connection.Id), BroadcastTarget.Session("one")];
+
+        foreach (var target in targets) {
+            await broadcaster.PublishAsync(target, "none");
+            await broadcaster.PublishAsync<string?>(target, "null", null);
+            await broadcaster.PublishAsync(target, "data", new { Value = 1, Items = new[] { "a" } });
+        }
+
+        var sent = socket.Sent.Select(System.Text.Encoding.UTF8.GetString).ToArray();
+        string[] local = sent[..3], remote = sent[3..];
+        Assert.That(local, Is.EqualTo(remote));
+        Assert.That(sent[1], Does.Contain("\"data\":null"));
+        Assert.That(sent[0], Does.Not.Contain("data"));
+        await host.StopAsync();
+    }
+
+    [Test]
+    public async Task UnknownConnectionAndOtherTargetsUseBackplaneAsync() {
+        var backplane = new RecordingBackplane();
+        using var host = CreateHost(backplane: backplane);
+        await host.StartAsync();
+        var socket = new TestWebSocket();
+        var connection = CreateConnection(socket, "one");
+        host.Services.GetRequiredService<ConnectionStorage>().Add(connection);
+        var broadcaster = host.Services.GetRequiredService<IBroadcaster>();
+
+        await broadcaster.PublishAsync(BroadcastTarget.Connection("remote"), "remote");
+        await broadcaster.PublishAsync(BroadcastTarget.Session("one"), "session");
+        await broadcaster.PublishAsync(BroadcastTarget.Group("session:one"), "group");
+        await broadcaster.PublishAsync(BroadcastTarget.Group("session:one").ExceptConnection("other"), "group-except");
+        await broadcaster.PublishAsync(BroadcastTarget.Groups(["session:one"]), "groups");
+
+        Assert.That(backplane.Published.Select(message => (message.TargetType, message.TargetId)), Is.EqualTo(new (BroadcastTargetType, string?)[] {
+            (BroadcastTargetType.Connection, "remote"), (BroadcastTargetType.Session, "one"), (BroadcastTargetType.Group, "session:one"),
+            (BroadcastTargetType.Groups, null), (BroadcastTargetType.Groups, null)
+        }));
+        Assert.That(socket.Sent, Has.Count.EqualTo(4));
+        await host.StopAsync();
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task TimedOutBroadcastAbortsConnectionAsync(bool local) {
         using var host = CreateHost(TimeSpan.FromMilliseconds(10));
         await host.StartAsync();
         var socket = new TestWebSocket { SendDelay = TimeSpan.FromSeconds(1) };
-        host.Services.GetRequiredService<ConnectionStorage>().Add(CreateConnection(socket, "one"));
+        var connection = CreateConnection(socket, "one");
+        host.Services.GetRequiredService<ConnectionStorage>().Add(connection);
 
-        await host.Services.GetRequiredService<IBroadcaster>().PublishAsync(BroadcastTarget.All, "updated", new { Value = 1 });
+        await host.Services.GetRequiredService<IBroadcaster>()
+            .PublishAsync(local ? BroadcastTarget.Connection(connection.Id) : BroadcastTarget.All, "updated", new { Value = 1 });
 
         Assert.That(socket.WasAborted, Is.True);
         await host.StopAsync();
@@ -172,14 +241,40 @@ public sealed class BroadcastTests {
         Assert.That(storage.GetAll(), Is.EqualTo(new[] { second }));
     }
 
-    private static IHost CreateHost(TimeSpan? timeout = null) {
+    private static IHost CreateHost(TimeSpan? timeout = null, IDarkWsBackplane? backplane = null) {
         return Host.CreateDefaultBuilder()
-            .ConfigureServices(services => services.AddDarkWs(options => {
-                if (timeout.HasValue) {
-                    options.BroadcastSendTimeout = timeout.Value;
+            .ConfigureServices(services => {
+                services.AddDarkWs(options => {
+                    if (timeout.HasValue) {
+                        options.BroadcastSendTimeout = timeout.Value;
+                    }
+                });
+                if (backplane is not null) {
+                    services.AddSingleton(backplane);
                 }
-            }))
+            })
             .Build();
+    }
+
+    private sealed class RecordingBackplane : IDarkWsBackplane {
+        private Func<BroadcastMessage, CancellationToken, ValueTask>? _listener;
+
+        public ConcurrentQueue<BroadcastMessage> Published { get; } = new();
+
+        public ValueTask PublishAsync(BroadcastMessage message, CancellationToken cancellationToken = default) {
+            Published.Enqueue(message);
+            return _listener?.Invoke(message, CancellationToken.None) ?? ValueTask.CompletedTask;
+        }
+
+        public ValueTask SubscribeAsync(Func<BroadcastMessage, CancellationToken, ValueTask> listener, CancellationToken cancellationToken = default) {
+            _listener = listener;
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask UnsubscribeAsync(CancellationToken cancellationToken = default) {
+            _listener = null;
+            return ValueTask.CompletedTask;
+        }
     }
 
     private static WebSocketConnection CreateConnection(TestWebSocket socket, string sessionId) {

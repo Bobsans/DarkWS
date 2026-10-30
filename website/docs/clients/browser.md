@@ -14,22 +14,29 @@ npm install darkws
 ```ts
 import DarkWs, { ErrorResponse } from "darkws";
 
-const client = new DarkWs({
+// One client for the whole application, created and connected on first use.
+export const client = DarkWs.lazy(() => ({
   secure: location.protocol === "https:",
   path: "/ws",
   authenticationToken: () => auth.accessToken(),
-}).connect();
+  // Reads are safe to repeat after a dropped connection; other actions fail at once.
+  requestOptions: action => action.endsWith(":get") ? { retry: { connectionClosed: 3 } } : undefined,
+}));
 
 const user = await client.request<User>("user:get", { id: "42" });
 
 const unsubscribe = client.onAction<User>("user:updated", updated => render(updated));
 
 unsubscribe();
-client.dispose();
 ```
 
-Construction starts no socket and no timer. `connect()` opens the socket; requests
-made before it opens wait for the connection.
+Start here rather than with a wrapper of your own: [`DarkWs.lazy()`](#application-wide-client)
+is the application-wide singleton, and [`requestOptions`](#default-options-per-action)
+sets timeouts and retries per action in one place.
+
+`new DarkWs(options)` creates a client directly. Construction starts no socket and no
+timer. `connect()` opens the socket; requests made before it opens wait for the
+connection.
 
 ## Requests
 
@@ -66,7 +73,8 @@ validate the application-specific shape of `data`.
 Waiting for a request has two phases:
 
 - `waitConnectionTimeout` (30 s) bounds waiting for an open socket.
-- `requestTimeout` (5 min) bounds waiting for the reply and starts after sending.
+- `requestTimeout` (60 s) bounds waiting for the reply and starts after sending.
+  Raise it per action through `requestOptions` for actions that legitimately take longer.
 
 A call can take up to the sum of both. `requestTimeout: 0` disables reply expiry: the
 request stays pending until a reply, disconnect, or disposal.
@@ -242,7 +250,7 @@ clean and use `authenticationToken`. After logout, clear whatever source `query`
 | Method | Behavior |
 | --- | --- |
 | `connect()` | Opens a socket; keeps an open or opening one |
-| `reconnect()` | Resets backoff and connects if no socket is open |
+| `reconnect()` | Resets backoff and connects now; keeps an open socket, replaces one still connecting |
 | `close(code = 1000)` | Immediately rejects pending calls, closes, and stops reconnecting; `code` must be 1000 or 3000–4999 |
 | `dispose()` | Terminal: stops timers, closes the socket, rejects pending requests |
 | `send(data, jsonify = true)` | Sends raw data without waiting for a reply |
@@ -293,7 +301,7 @@ delays mean an immediate deadline or retry, respectively.
 | `host` | `location.host` | Host and port |
 | `query` | none | Object or function returning URL query parameters |
 | `authenticationToken` | none | Token provider for automatic authentication |
-| `requestTimeout` | 300000 | Reply deadline in ms; `0` disables it |
+| `requestTimeout` | 60000 | Reply deadline in ms; `0` disables it |
 | `requestOptions` | none | Default request options per action |
 | `maxPendingRequests` | 256 | Pending request and command limit |
 | `controlTimeout` | 30000 | Reply deadline for `authenticate()` and `logout()`; `0` disables it |

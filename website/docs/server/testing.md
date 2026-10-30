@@ -41,6 +41,16 @@ Each invocation creates a fresh message scope. The optional second constructor
 argument configures `DarkWsOptions`, for example `options => options.AllowNullPayloads = true`.
 `host.Services` is the root service provider.
 
+`RequestAsync` does the same and returns the response envelope, matched by request
+id, so broadcasts the action sends to the connection do not get in the way:
+
+```csharp
+var response = await host.RequestAsync(connection, "message:echo", JsonSerializer.SerializeToElement("hello"));
+Assert.That(response!.Value.GetProperty("data").GetString(), Is.EqualTo("hello"));
+```
+
+It returns null when the invocation ends without a response, as a cancelled one can.
+
 ## Authenticated calls
 
 Pass a session to `CreateConnection`. Its principal must be authenticated

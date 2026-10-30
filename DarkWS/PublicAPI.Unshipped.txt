@@ -1,1 +1,4 @@
 #nullable enable
+DarkWS.DarkWsActionInfo.HasAttribute<T>() -> bool
+DarkWS.HandlerBase.SessionOrDefault.get -> DarkWS.Abstractions.IDarkWsSession?
+DarkWS.HandlerBase<TSession>.SessionOrDefault.get -> TSession?

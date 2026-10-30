@@ -96,7 +96,7 @@ describe("DarkWs", () => {
     const client = createClient({ ...options, pingInterval: 600000 }).connect();
     MockWebSocket.instances[0].open();
     const rejected = expect(client.request("silent")).rejects.toBeInstanceOf(RequestTimeoutError);
-    await vi.advanceTimersByTimeAsync(299999);
+    await vi.advanceTimersByTimeAsync(59999);
     expect(client.pendingRequestCount).toBe(1);
     await vi.advanceTimersByTimeAsync(1);
     await rejected;
@@ -1175,6 +1175,25 @@ describe("DarkWs", () => {
     socket.serverClose();
     client.reconnect();
     expect(MockWebSocket.instances).toHaveLength(2);
+    client.dispose();
+  });
+
+  it("replaces a socket stuck connecting and sends waiting requests on the new one", async () => {
+    const client = createClient().connect();
+    const stuck = MockWebSocket.instances[0];
+    const response = client.request<string>("waiting");
+    client.reconnect();
+    expect(stuck.readyState).toBe(MockWebSocket.CLOSED);
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    const fresh = MockWebSocket.instances[1];
+    fresh.open();
+    await vi.advanceTimersByTimeAsync(0);
+    const request = JSON.parse(fresh.sent[0] as string) as { id: string };
+    fresh.serverMessage({ id: request.id, data: "done" });
+    await expect(response).resolves.toBe("done");
+    expect(stuck.sent).toHaveLength(0);
+    expect(client.connected).toBe(true);
     client.dispose();
   });
 

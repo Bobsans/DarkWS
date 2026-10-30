@@ -6,6 +6,61 @@ include migration guidance before a release is published.
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-10-30
+
+### Added
+
+- An action may declare a `CancellationToken` parameter, before or after its payload.
+  It receives `ConnectionAborted`. At most one token and one payload are allowed.
+- `HandlerBase.SessionOrDefault` and `HandlerBase<TSession>.SessionOrDefault` return
+  the session the action was authorized with, or null for an anonymous caller.
+- `DarkWsActionInfo.HasAttribute<T>()` checks the action method and its handler class,
+  so marker-attribute filters no longer scan `Attributes` and `HandlerAttributes` by hand.
+- `DarkWsTestHost.RequestAsync` invokes an action and returns its response envelope,
+  matched by request id, or null when the invocation ended without a response.
+
+### Changed
+
+- `HandlerBase.Session` with no session, as in an `[AllowAnonymous]` action called
+  anonymously, throws `ErrorResponseException` with `AuthorizationRequiredError`
+  instead of `InvalidOperationException`. The client now receives that code instead
+  of `RequestFailedError`, and the failure is no longer logged as a handler crash.
+  An incompatible session type in `HandlerBase<TSession>` still throws
+  `InvalidOperationException`. Migration: replace a catch of `InvalidOperationException`
+  around `Session` with `SessionOrDefault`.
+- Exceptions thrown by an authenticator, on upgrade or on `auth:`, and unexpected
+  action failures are logged at `Error` instead of `Warning`. A rejected token (a
+  null session) is still not logged. Migration: adjust log filters or alerts keyed
+  on the old level.
+- Browser client: `requestTimeout` defaults to 60 s instead of 5 minutes, so a lost
+  reply fails within a minute. Migration: pass `requestTimeout: 300000`, or raise it
+  per action through `requestOptions`.
+- Browser client: `reconnect()` replaces a socket that is still connecting instead of
+  keeping it. A connect attempt whose packets were dropped, as Android does for a
+  background page, could hang for half a minute. Requests waiting for the connection
+  go out on the new socket. An open socket is still kept.
+- Browser docs start with `DarkWs.lazy()` and `requestOptions`.
+- A `Connection` target whose connection is registered on this instance, including
+  `HandlerBase.Self`, is delivered locally and no longer goes through the backplane.
+  For such a target `PublishAsync` now awaits the socket write. The write is bounded
+  by `BroadcastSendTimeout`, and the connection is aborted on timeout, as with other
+  deliveries. A handler that awaits the publish therefore sends the notification
+  before its action response; previously the order was racy. A connection id that
+  is not registered locally still goes through the backplane. Custom
+  `IDarkWsBackplane` implementations no longer see local connection targets.
+  Migration: no code changes are needed. Do not rely on a local `Self` message
+  being visible to the backplane or to other instances.
+- `DarkWsTestHost.Broadcasts` records every publish at the broadcaster, so it still
+  includes local connection targets that bypass the backplane.
+
+### Fixed
+
+- With `DarkWS.Redis`, a message to `Self` was serialized twice, published to Redis,
+  and deserialized on every subscribed instance, which all but the owner dropped.
+  Large `Self` payloads could saturate the shared Redis connection and cause
+  `RedisTimeoutException` on `PUBLISH`, stalling every other Redis command of the instance.
+  A local connection target is now serialized once, straight to the bytes sent.
+
 ## [5.0.0] - 2026-09-30
 
 ### Added
@@ -572,7 +627,8 @@ fragmented messages before rollout. The three-argument WebSocketConnection
 constructor remains available. This entry records the behavior of the already
 released 2.1.0; it does not retroactively change its version or defaults.
 
-[Unreleased]: https://github.com/Bobsans/DarkWS/compare/v5.0.0...HEAD
+[Unreleased]: https://github.com/Bobsans/DarkWS/compare/v5.1.0...HEAD
+[5.1.0]: https://github.com/Bobsans/DarkWS/compare/v5.0.0...v5.1.0
 [5.0.0]: https://github.com/Bobsans/DarkWS/compare/v4.0.0...v5.0.0
 [4.0.0]: https://github.com/Bobsans/DarkWS/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/Bobsans/DarkWS/compare/v2.1.0...v3.0.0

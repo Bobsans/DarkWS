@@ -114,11 +114,14 @@ builder.Services.AddDarkWs().AddActionFilter<RoleFilter>();
 Фильтр может вернуть собственный `IResponse`, не вызывая `next`, либо проверить
 ответ или перехватить исключение из `next`. Вызывайте `next` не более одного раза.
 
+Атрибут-маркер без значений не требует просмотра обоих списков:
+`context.Action.HasAttribute<RequiresCardAttribute>()` проверяет метод и класс его обработчика.
+
 `DarkWsActionContext` предоставляет:
 
 | Свойство | Значение |
 | --- | --- |
-| `Action` | `DarkWsActionInfo`: `Name`, `HandlerType`, `Method`, `Attributes` метода, `HandlerAttributes` класса |
+| `Action` | `DarkWsActionInfo`: `Name`, `HandlerType`, `Method`, `Attributes` метода, `HandlerAttributes` класса, `HasAttribute<T>()` |
 | `RequestId` | Идентификатор запроса клиента |
 | `Payload` / `RawPayload` | Десериализованный параметр и полученный JSON |
 | `Session` | Сессия, зафиксированная для этого запроса |

@@ -104,3 +104,20 @@ documented `id`, `action`, `data`, and `error` fields.
   `KeepSessionOnFailedAuthentication`, and `AcceptAnonymousOnUpgradeAuthenticationException`.
 - Browser: `authenticationToken`, `sessionRestoreFailed`, retries, `requestOptions`,
   `onAction`, `DarkWs.lazy()`, `isCurrentSocket`, and `reconnectOnVisible`.
+
+## From 5.0 to 5.1
+
+5.1 adds API and changes no signatures. Check these behavior changes:
+
+- `HandlerBase.Session` without a session throws `ErrorResponseException` with
+  `AuthorizationRequiredError`, not `InvalidOperationException`. Use
+  `SessionOrDefault` in `[AllowAnonymous]` actions that serve both kinds of caller.
+- Authenticator exceptions and unexpected action failures are logged at `Error`.
+- A `Connection` target on this instance, `Self` included, skips the backplane, and
+  `PublishAsync` completes after the socket write.
+- Browser: `requestTimeout` defaults to 60 s. Set `requestTimeout: 300000` to keep 5
+  minutes, or raise it per action with `requestOptions`.
+- Browser: `reconnect()` replaces a socket that is still connecting.
+
+New: a `CancellationToken` action parameter, `SessionOrDefault`,
+`DarkWsActionInfo.HasAttribute<T>()`, and `DarkWsTestHost.RequestAsync`.

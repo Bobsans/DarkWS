@@ -315,7 +315,7 @@ internal sealed class WebSocketHandler(
 
             return error.GetResponse();
         } catch (Exception error) {
-            if (logger.IsEnabled(LogLevel.Warning)) {
+            if (logger.IsEnabled(LogLevel.Error)) {
                 Log.ActionFailed(logger, message.Action, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, error);
             }
 
@@ -357,7 +357,7 @@ internal sealed class WebSocketHandler(
         async ValueTask<IResponse> InvokeHandlerAsync() {
             var handler = (HandlerBase)services.GetRequiredService(action.HandlerType);
             handler.Initialize(context);
-            return await action.InvokeAsync(handler, parameter)
+            return await action.InvokeAsync(handler, parameter, cancellationToken)
                 ?? throw new InvalidOperationException($"Action {request.ActionName} returned no response");
         }
 
@@ -535,10 +535,11 @@ internal sealed class WebSocketHandler(
             LoggerMessage.Define<string, long>(LogLevel.Debug, new EventId(10, nameof(ControlledError)), "{Action} returned an error in {Duration}ms");
 
         public static readonly Action<ILogger, string, long, Exception?> ActionFailed =
-            LoggerMessage.Define<string, long>(LogLevel.Warning, new EventId(11, nameof(ActionFailed)), "{Action} failed in {Duration}ms");
+            LoggerMessage.Define<string, long>(LogLevel.Error, new EventId(11, nameof(ActionFailed)), "{Action} failed in {Duration}ms");
 
+        // Only a throwing authenticator gets here; a rejected token is a null session and is not logged.
         public static readonly Action<ILogger, Exception?> AuthenticationFailed =
-            LoggerMessage.Define(LogLevel.Warning, new EventId(12, nameof(AuthenticationFailed)), "Re-authentication failed");
+            LoggerMessage.Define(LogLevel.Error, new EventId(12, nameof(AuthenticationFailed)), "Re-authentication failed");
 
         public static readonly Action<ILogger, Exception?> ShutdownTimeout =
             LoggerMessage.Define(LogLevel.Warning, new EventId(13, nameof(ShutdownTimeout)), "WebSocket tasks did not finish before shutdown timeout");

@@ -58,7 +58,9 @@ clients reload from the source of truth.
   hold up unrelated broadcasts.
 - Writes to one socket stay serialized, but broadcast order on a connection is not
   guaranteed. Include a version or sequence number when order matters.
-- `PublishAsync` completes when Redis accepts the message, not after delivery.
+- `PublishAsync` completes when Redis accepts the message, not after delivery. A
+  `Connection` target on this instance, such as `Self`, is written locally and never
+  reaches Redis.
 - A Redis callback feeds a bounded local queue without waiting for delivery. It
   holds at most `QueueCapacity` messages; when full, the **new** message is dropped.
   There is no replay or disconnect on overflow, and other publishers remain independent.

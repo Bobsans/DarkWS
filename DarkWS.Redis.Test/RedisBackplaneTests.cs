@@ -567,6 +567,54 @@ public sealed class RedisBackplaneTests {
         }
     }
 
+    [Test]
+    public async Task LocalConnectionTargetDoesNotPublishToRedis() {
+        var channel = $"darkws-test:{Guid.NewGuid():N}";
+        await using var first = CreateProvider(channel);
+        await using var second = CreateProvider(channel);
+        var firstService = first.GetRequiredService<IHostedService>();
+        var secondService = second.GetRequiredService<IHostedService>();
+        await firstService.StartAsync(default);
+        await secondService.StartAsync(default);
+        using var local = new DarkWsTestConnection(new GroupSession("local", ["g"]));
+        using var remote = new DarkWsTestConnection(new GroupSession("remote", ["g"]));
+        first.GetRequiredService<ConnectionStorage>().Add(local);
+        second.GetRequiredService<ConnectionStorage>().Add(remote);
+        var publications = new ConcurrentQueue<string>();
+        var groupSeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var wire = await _connection.GetSubscriber().SubscribeAsync(RedisChannel.Literal(channel));
+        wire.OnMessage(message => {
+            using var json = JsonDocument.Parse(message.Message.ToString());
+            var action = json.RootElement.GetProperty("action").GetString()!;
+            publications.Enqueue(action);
+            if (action == "group") {
+                groupSeen.TrySetResult();
+            }
+        });
+        try {
+            var broadcaster = first.GetRequiredService<IBroadcaster>();
+            await broadcaster.PublishAsync(BroadcastTarget.Connection(local.Id), "self", new { Value = 1 });
+            Assert.That(local.SentMessages.Count(bytes => HasAction(bytes, "self")), Is.EqualTo(1));
+
+            // Both publishes share one multiplexer, so Redis would have delivered "self" before "group".
+            await broadcaster.PublishAsync(BroadcastTarget.Group("g"), "group");
+            await groupSeen.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (!local.SentMessages.Any(bytes => HasAction(bytes, "group")) || !remote.SentMessages.Any(bytes => HasAction(bytes, "group"))) {
+                await Task.Delay(10, deadline.Token);
+            }
+
+            Assert.That(publications, Is.EqualTo(new[] { "group" }));
+            Assert.That(local.SentMessages.Count(bytes => HasAction(bytes, "group")), Is.EqualTo(1));
+            Assert.That(remote.SentMessages.Count(bytes => HasAction(bytes, "group")), Is.EqualTo(1));
+            Assert.That(remote.SentMessages.Any(bytes => HasAction(bytes, "self")), Is.False);
+        } finally {
+            await wire.UnsubscribeAsync();
+            await firstService.StopAsync(default);
+            await secondService.StopAsync(default);
+        }
+    }
+
     private static bool HasAction(byte[] bytes, string action) {
         using var json = JsonDocument.Parse(bytes);
         return json.RootElement.GetProperty("action").GetString() == action;

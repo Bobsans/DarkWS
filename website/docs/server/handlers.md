@@ -15,8 +15,8 @@ using DarkWS;
 [Handler("message")]
 public sealed class MessageHandler(MessageService messages) : HandlerBase {
     [Action("get")]
-    public async Task<IResponse> GetAsync(Guid id) {
-        var message = await messages.FindAsync(id, ConnectionAborted);
+    public async Task<IResponse> GetAsync(Guid id, CancellationToken cancellationToken) {
+        var message = await messages.FindAsync(id, cancellationToken);
         return message is null ? Error("message:not-found") : Ok(message);
     }
 
@@ -47,7 +47,8 @@ that names the type, the method, and the reason.
   methods are not scanned: declare or override the action on the concrete handler
   and mark it with `[Action]`.
 - An action returns exactly `IResponse` or `Task<IResponse>`.
-- An action accepts zero or one payload parameter. Generic methods and
+- An action accepts zero or one payload parameter and, in any position, at most one
+  `CancellationToken`, which receives `ConnectionAborted`. Generic methods and
   by-reference, byref-like, or pointer parameters are rejected.
 - Assembly scanning registers only handlers. Filters, initializers, and hooks are
   registered explicitly.
@@ -63,7 +64,8 @@ Inside an action, `HandlerBase` exposes the request context:
 | Member | Meaning |
 | --- | --- |
 | `Connection` | The current `IWebSocketConnection` (`Id`, `Session`, `IsOpen`, `CloseAsync`, `Abort`) |
-| `Session` | The authenticated session; throws for an anonymous connection |
+| `Session` | The session the action was authorized with; for an anonymous caller of an `[AllowAnonymous]` action, throws `ErrorResponseException` with `AuthorizationRequiredError` |
+| `SessionOrDefault` | The same session, or null for an anonymous caller |
 | `HttpContext` | The upgrade request's `HttpContext`, shared by the connection |
 | `AspNetSession` | ASP.NET `ISession` when session middleware is installed, otherwise null |
 | `ConnectionAborted` | Cancelled when the connection stops; pass it to async work |
@@ -126,7 +128,7 @@ if (!await permissions.CanEditAsync(Session.UserId, id)) {
 throw new ErrorResponseException<ValidationDetails>("message:invalid", details);
 ```
 
-Any other exception is logged as a warning and answered with
+Any other exception is logged as an error and answered with
 `darkws:error:request-failed`. Its message is never sent to the client. To create
 your own exception type with a protocol response, derive from `DarkWsException` and
 implement `GetResponse()`.

@@ -114,11 +114,14 @@ builder.Services.AddDarkWs().AddActionFilter<RoleFilter>();
 A filter may return its own `IResponse` without calling `next`, or inspect the
 response or catch the exception from `next`. Call `next` at most once.
 
+A marker attribute without values needs no scan of both lists:
+`context.Action.HasAttribute<RequiresCardAttribute>()` checks the method and its handler class.
+
 `DarkWsActionContext` exposes:
 
 | Property | Meaning |
 | --- | --- |
-| `Action` | `DarkWsActionInfo`: `Name`, `HandlerType`, `Method`, method `Attributes`, class `HandlerAttributes` |
+| `Action` | `DarkWsActionInfo`: `Name`, `HandlerType`, `Method`, method `Attributes`, class `HandlerAttributes`, `HasAttribute<T>()` |
 | `RequestId` | The client's request id |
 | `Payload` / `RawPayload` | The deserialized parameter and the received JSON |
 | `Session` | The session captured for this request |

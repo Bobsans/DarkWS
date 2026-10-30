@@ -48,9 +48,10 @@ public static class DarkWsEndpointRouteBuilderExtensions {
             } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
                 throw;
             } catch (Exception error) {
+                // A throwing authenticator is a bug or an outage, unlike a rejected token, which returns null.
                 context.RequestServices.GetRequiredService<ILoggerFactory>()
                     .CreateLogger(typeof(DarkWsEndpointRouteBuilderExtensions))
-                    .LogWarning(error, "DarkWS upgrade authentication failed");
+                    .LogError(error, "DarkWS upgrade authentication failed");
                 if (!options.AcceptAnonymousOnUpgradeAuthenticationException) {
                     context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                     return;

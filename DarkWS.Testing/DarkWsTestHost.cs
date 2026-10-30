@@ -24,10 +24,10 @@ public sealed class DarkWsTestHost : IAsyncDisposable {
         configure(services.AddDarkWs(configureOptions));
         services.Replace(ServiceDescriptor.Singleton<IDarkWsBackplane>(_backplane));
         _services = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
-        _backplane.SubscribeAsync((message, cancellationToken) => {
-            _broadcasts.Enqueue(message);
-            return _services.GetRequiredService<Broadcaster>().DeliverAsync(message, cancellationToken);
-        }).GetAwaiter().GetResult();
+        // Local connection targets bypass the backplane, so record at the publisher rather than in the subscription.
+        var broadcaster = _services.GetRequiredService<Broadcaster>();
+        broadcaster.Published = _broadcasts.Enqueue;
+        _backplane.SubscribeAsync(broadcaster.DeliverAsync).GetAwaiter().GetResult();
     }
 
     /// <summary>Gets the root provider for application singleton inspection. Resolve scoped dependencies through CreateScope.</summary>
@@ -68,6 +68,22 @@ public sealed class DarkWsTestHost : IAsyncDisposable {
         if (message is not null) {
             await dispatcher.ProcessMessageAsync(message, connection, cancellationToken);
         }
+    }
+
+    /// <summary>Invokes an action like InvokeAsync and returns its response envelope: <c>{ id, data }</c> or <c>{ id, error, data }</c>.</summary>
+    /// <remarks>The response is matched by a fresh request id, so broadcasts sent to the connection meanwhile are skipped.
+    /// Returns null when the invocation finished without a response, as a cancelled one can.</remarks>
+    public async Task<JsonElement?> RequestAsync(DarkWsTestConnection connection, string action, JsonElement? data = null,
+        CancellationToken cancellationToken = default) {
+        var requestId = Guid.NewGuid().ToString("N");
+        await InvokeAsync(connection, action, data, requestId, cancellationToken);
+        foreach (var bytes in connection.SentMessages.Reverse()) {
+            using var message = JsonDocument.Parse(bytes);
+            if (message.RootElement.TryGetProperty("id", out var id) && id.ValueEquals(requestId)) {
+                return message.RootElement.Clone();
+            }
+        }
+        return null;
     }
 
     private void ValidateConnection(DarkWsTestConnection connection) {
