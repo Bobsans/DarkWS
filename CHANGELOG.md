@@ -6,6 +6,14 @@ include migration guidance before a release is published.
 
 ## [Unreleased]
 
+## [5.1.1] - 2026-10-30
+
+### Fixed
+
+- NuGet package READMEs are plain Markdown. NuGet.org does not render HTML, so the
+  centered logo block showed up as raw `<div>` and `<img>` tags. The package icon is
+  still shown by NuGet itself.
+
 ## [5.1.0] - 2026-10-30
 
 ### Added
@@ -627,7 +635,8 @@ fragmented messages before rollout. The three-argument WebSocketConnection
 constructor remains available. This entry records the behavior of the already
 released 2.1.0; it does not retroactively change its version or defaults.
 
-[Unreleased]: https://github.com/Bobsans/DarkWS/compare/v5.1.0...HEAD
+[Unreleased]: https://github.com/Bobsans/DarkWS/compare/v5.1.1...HEAD
+[5.1.1]: https://github.com/Bobsans/DarkWS/compare/v5.1.0...v5.1.1
 [5.1.0]: https://github.com/Bobsans/DarkWS/compare/v5.0.0...v5.1.0
 [5.0.0]: https://github.com/Bobsans/DarkWS/compare/v4.0.0...v5.0.0
 [4.0.0]: https://github.com/Bobsans/DarkWS/compare/v3.0.0...v4.0.0

@@ -1,7 +1,3 @@
-<div align="center">
-
-<img src="https://raw.githubusercontent.com/Bobsans/DarkWS/main/assets/icon.png" alt="DarkWS logo" width="96">
-
 # DarkWS.Redis
 
 [![NuGet](https://img.shields.io/nuget/v/DarkWS.Redis.svg?label=NuGet)](https://www.nuget.org/packages/DarkWS.Redis)
@@ -9,8 +5,6 @@
 [![.NET](https://img.shields.io/badge/.NET-8%20%7C%209%20%7C%2010-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
 [![Docs](https://img.shields.io/badge/docs-bobsans.github.io%2FDarkWS-blue)](https://bobsans.github.io/DarkWS/server/redis)
 [![License](https://img.shields.io/github/license/Bobsans/DarkWS)](https://github.com/Bobsans/DarkWS/blob/main/LICENSE)
-
-</div>
 
 Redis backplane for [DarkWS](https://www.nuget.org/packages/DarkWS): broadcasts
 published on one server instance reach clients connected to every instance.
