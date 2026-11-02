@@ -63,8 +63,22 @@ jobs:
       # Low findings pass: deepmerge, pulled in by Docusaurus through @svgr/plugin-svgo, has no
       # patched release (GHSA-gcqx-w48m-w2h4 covers every 4.2+ version) and only merges build-time
       # SVGO config. Lower the level again once deepmerge ships a fix.
+      # GHSA-g3hv-75wg-m249 passes: it marks every minimatch below 11.0.1, but the amplified code
+      # (firstPhasePreProcess) exists only since 9.x. typedoc gets 11.x through an override; the
+      # remaining 3.x copy, used by serve-handler for `docusaurus serve`, has no such code and cannot
+      # take 11.x, whose CommonJS export is not callable. Drop the exception once serve-handler moves on.
       - name: Audit site dependencies
-        run: npm audit --prefix website --audit-level=moderate
+        working-directory: website
+        run: |
+          (npm audit --json || true) | node -e '
+            const allowed = ["GHSA-g3hv-75wg-m249"];
+            const rank = { info: 0, low: 1, moderate: 2, high: 3, critical: 4 };
+            const { vulnerabilities } = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            const failing = Object.values(vulnerabilities).flatMap(entry => entry.via)
+              .filter(via => typeof via === "object" && rank[via.severity] >= rank.moderate && !allowed.some(id => via.url.endsWith(id)));
+            for (const via of failing) console.log(`${via.severity} ${via.name} ${via.range} ${via.url} ${via.title}`);
+            process.exit(failing.length ? 1 : 0);
+          '
 
       - name: Install browser SDK test tools
         run: npm ci --prefix packages/darkws
