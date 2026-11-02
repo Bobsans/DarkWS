@@ -273,8 +273,10 @@ immediately. The native `close` event can arrive later.
 
 ### Heartbeat
 
-The client sends text `ping` every `pingInterval` (30 s). If no `pong` arrives within
-`pongTimeout` (30 s, `0` disables it), the socket is treated as dead: its requests
+The client sends text `ping` every `pingInterval` (30 s). Any incoming frame, not only
+`pong`, proves the socket alive, because on a slow link the `pong` can wait behind
+large queued messages. If no frame arrives within `pongTimeout` (30 s, `0` disables
+it) after a ping, the socket is treated as dead: its requests
 fail and the client reconnects. This detects half-open connections that TCP would
 notice only much later. The .NET 8 server relies on this traffic to keep idle
 connections open.

@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using DarkWS.Abstractions;
 using DarkWS.Test.Project;
@@ -361,6 +362,48 @@ public sealed class AuditRemediationTests {
         using var connection = new WebSocketConnection(socket, new DefaultHttpContext(), null) { SendTimeout = TimeSpan.FromMilliseconds(50) };
         await Assert.ThrowsAsync<TimeoutException>(async () => await connection.SendAsync(new byte[] { 1 }));
         Assert.That(socket.WasAborted, Is.True);
+    }
+
+    [Test]
+    public async Task QueuedWritesDoNotCountAgainstTheWriteDeadline() {
+        await using var provider = CreateProvider(options => options.BroadcastSendTimeout = TimeSpan.FromSeconds(1));
+        var socket = new TestWebSocket { SendDelay = TimeSpan.FromMilliseconds(300) };
+        using var connection = new WebSocketConnection(socket, new DefaultHttpContext { RequestServices = provider }, null) { SendTimeout = TimeSpan.FromSeconds(1) };
+        provider.GetRequiredService<ConnectionStorage>().Add(connection);
+        var broadcaster = provider.GetRequiredService<IBroadcaster>();
+
+        // About 3.3 s of writes queue at once on one socket; each write alone fits its 1 s deadline.
+        var sends = Enumerable.Range(0, 10)
+            .Select(index => broadcaster.PublishAsync(BroadcastTarget.Connection(connection.Id), $"sync-{index}", index))
+            .ToList();
+        sends.Add(connection.SendAsync("\"reply\""u8.ToArray()));
+        await Task.WhenAll(sends).WaitAsync(TimeSpan.FromSeconds(10));
+
+        var messages = socket.Sent.Select(Encoding.UTF8.GetString).ToArray();
+        Assert.Multiple(() => {
+            Assert.That(socket.WasAborted, Is.False);
+            Assert.That(messages, Has.Length.EqualTo(11));
+            Assert.That(messages.Take(10).Select(message => JsonNode.Parse(message)!["action"]!.GetValue<string>()), Is.EqualTo(Enumerable.Range(0, 10).Select(index => $"sync-{index}")));
+            Assert.That(messages.Last(), Is.EqualTo("\"reply\""));
+        });
+    }
+
+    [Test]
+    public async Task StalledWriteAbortsOnceAndReleasesQueuedWrites() {
+        await using var provider = CreateProvider(options => options.BroadcastSendTimeout = TimeSpan.FromMilliseconds(200));
+        var socket = new TestWebSocket { SendBarrier = new TaskCompletionSource().Task };
+        using var connection = CreateConnection(provider, socket);
+        provider.GetRequiredService<ConnectionStorage>().Add(connection);
+        var broadcaster = provider.GetRequiredService<IBroadcaster>();
+
+        var sends = Enumerable.Range(0, 5).Select(index => broadcaster.PublishAsync(BroadcastTarget.Connection(connection.Id), $"sync-{index}")).ToArray();
+        await Task.WhenAll(sends).WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Multiple(() => {
+            Assert.That(socket.WasAborted, Is.True);
+            Assert.That(socket.Sent, Is.Empty);
+            Assert.That(provider.GetRequiredService<Probe>().Logs.Count(log => log.Contains("timed out")), Is.EqualTo(1));
+        });
     }
 
     [Test]

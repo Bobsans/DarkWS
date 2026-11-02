@@ -34,10 +34,10 @@ public sealed class DarkWsOptions {
     /// <summary>Pending-read deadline on .NET 8. Default 2 minutes; data fragments reset it. Idle clients must send application traffic.</summary>
     public TimeSpan ReceiveIdleTimeout { get; set; } = TimeSpan.FromMinutes(2);
 
-    /// <summary>Combined lock wait and socket write deadline. Default 30 seconds; expiration aborts the connection.</summary>
+    /// <summary>Write deadline after the connection's send lock is acquired; time spent queued behind other messages of the same connection is not counted. Default 30 seconds; expiration aborts the connection.</summary>
     public TimeSpan SendTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>Per-recipient broadcast deadline. Default 10 seconds; expiration aborts that recipient.</summary>
+    /// <summary>Per-recipient broadcast write deadline after the connection's send lock is acquired; time spent queued behind other messages of the same connection is not counted. Default 10 seconds; expiration aborts that recipient.</summary>
     public TimeSpan BroadcastSendTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>Shared deadline for cancellation, close hooks, and handshake. Default 10 seconds; uncooperative tasks retain resources until completion.</summary>

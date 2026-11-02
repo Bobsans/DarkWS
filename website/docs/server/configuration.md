@@ -35,8 +35,8 @@ they use, so changing options at runtime does not reconfigure existing connectio
 | `KeepAliveInterval` | 30 s | Transport keep-alive interval |
 | `KeepAliveTimeout` | 30 s | Transport PONG deadline (.NET 9 and later) |
 | `ReceiveIdleTimeout` | 2 min | Pending read deadline (.NET 8) |
-| `SendTimeout` | 30 s | Send lock wait plus socket write |
-| `BroadcastSendTimeout` | 10 s | Per-recipient broadcast write deadline |
+| `SendTimeout` | 30 s | Socket write deadline, after the send lock is acquired |
+| `BroadcastSendTimeout` | 10 s | Per-recipient broadcast write deadline, after the send lock is acquired |
 | `ShutdownTimeout` | 10 s | Handlers, close hooks, and close handshake on shutdown |
 | `AllowedOrigins` | empty (any) | Browser origins allowed to open the endpoint |
 | `AuthenticationQueryParameter` | `token` | Query parameter passed to the authenticator on upgrade |
@@ -101,10 +101,13 @@ Both clients also detect dead servers with their own ping/pong timeout.
 
 ## Sending and shutdown
 
-- `SendTimeout` covers waiting for the connection's send lock and writing to the
-  socket. On expiry the socket is aborted.
-- Broadcasts use the shorter `BroadcastSendTimeout` per recipient, so a slow client
-  cannot hold up others.
+- Writes to one connection are serialized. `SendTimeout` is the write deadline after
+  the connection's send lock is acquired; time spent queued behind other messages of
+  the same connection is not counted. On expiry the socket is aborted, and the
+  messages queued behind the stalled write are dropped.
+- Broadcasts use the shorter `BroadcastSendTimeout` per recipient, measured the same
+  way, so a slow client cannot hold up others and a busy one is not aborted for its
+  queue.
 - On shutdown the connection leaves storage immediately. Peer close cancels action,
   authentication, authentication-hook, and command-write tokens. `ShutdownTimeout`
   is one shared deadline for pending actions and commands, close hooks, and the

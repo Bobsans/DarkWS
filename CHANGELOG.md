@@ -6,6 +6,24 @@ include migration guidance before a release is published.
 
 ## [Unreleased]
 
+## [5.1.2] - 2026-11-02
+
+### Fixed
+
+- `SendTimeout` and `BroadcastSendTimeout` bound only the socket write of a message,
+  measured from the moment the connection's send lock is acquired. Time spent queued
+  behind other messages of the same connection is no longer counted. Before, a healthy
+  socket with several megabytes queued, for example many `Self` sync answers at once
+  on a slow link, was aborted once the queue took longer than the timeout to drain,
+  and every pending request of that socket was lost. A stalled write is still aborted
+  after its deadline; the messages queued behind it are dropped without a timeout
+  warning each.
+- The browser client treats any incoming frame, not only `pong`, as proof that the
+  socket is alive. On a slow link the server's `pong` waits behind the data queued
+  before it, so the client closed a socket that was still delivering data with
+  `Pong timeout`. A connection with no incoming frames at all is still closed after
+  `pongTimeout`.
+
 ## [5.1.1] - 2026-10-30
 
 ### Fixed
@@ -635,7 +653,8 @@ fragmented messages before rollout. The three-argument WebSocketConnection
 constructor remains available. This entry records the behavior of the already
 released 2.1.0; it does not retroactively change its version or defaults.
 
-[Unreleased]: https://github.com/Bobsans/DarkWS/compare/v5.1.1...HEAD
+[Unreleased]: https://github.com/Bobsans/DarkWS/compare/v5.1.2...HEAD
+[5.1.2]: https://github.com/Bobsans/DarkWS/compare/v5.1.1...v5.1.2
 [5.1.1]: https://github.com/Bobsans/DarkWS/compare/v5.1.0...v5.1.1
 [5.1.0]: https://github.com/Bobsans/DarkWS/compare/v5.0.0...v5.1.0
 [5.0.0]: https://github.com/Bobsans/DarkWS/compare/v4.0.0...v5.0.0

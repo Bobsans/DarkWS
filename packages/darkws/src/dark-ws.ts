@@ -477,7 +477,11 @@ export default class DarkWs {
       this.rejectRequestsFor(socket);
       this.emit("close", event);
     });
-    socket.addEventListener("message", (event) => this.handleMessage(event));
+    socket.addEventListener("message", (event) => {
+      // Any frame proves the socket alive: on a slow link the pong waits behind megabytes of queued data.
+      if (socket === this.socket) this.clearPongTimer();
+      this.handleMessage(event);
+    });
     return this;
   }
 
@@ -588,10 +592,7 @@ export default class DarkWs {
   }
 
   private handleMessage(event: MessageEvent): void {
-    if (event.data === "pong") {
-      this.clearPongTimer();
-      return;
-    }
+    if (event.data === "pong") return;
     if (event.data === "auth:success" || event.data === "auth:failed" || event.data === "logout:success") {
       const resolver = this.controlRequest;
       if (resolver && String(event.data).startsWith(resolver.request.action + ":")) {

@@ -68,7 +68,9 @@ cancelled token throws before publishing.
 - **Serialization** happens once per broadcast; all recipients share the same bytes.
 - **Local delivery** writes to all recipients concurrently. A socket that does not
   accept the write within `BroadcastSendTimeout` (10 seconds) is aborted without
-  delaying the others.
+  delaying the others. The deadline starts once the connection's send lock is
+  acquired, so time spent queued behind other messages of the same connection is
+  not counted.
 - **Order** on one connection is not guaranteed. Include a version or sequence number
   in the data when order matters.
 - **Cancellation** of the publisher's token prevents publishing but does not stop a

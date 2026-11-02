@@ -105,29 +105,37 @@ internal sealed class WebSocketConnection(
         return new ReceivedMessage(result, stream.ToArray());
     }
 
-    /// <summary>Sends immutable bytes with serialized writes. The built-in transport bounds lock wait and send time and aborts on timeout; closing connections ignore new writes.</summary>
-    public async Task SendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) {
+    /// <summary>Sends immutable bytes with serialized writes. The built-in transport bounds the socket write, not the wait behind earlier messages, and aborts on timeout; closing connections ignore new writes.</summary>
+    public Task SendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default) {
+        return SendAsync(data, SendTimeout, cancellationToken);
+    }
+
+    // The deadline starts once the send lock is acquired: a long queue on a healthy socket is not a stall.
+    // A stalled write aborts the transport while it still holds the lock, so every queued write then finds it closed and returns.
+    internal async Task SendAsync(ReadOnlyMemory<byte> data, TimeSpan writeTimeout, CancellationToken cancellationToken) {
         if (!TryBeginOperation()) {
             return;
         }
 
         try {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopping.Token);
-            timeout.CancelAfter(SendTimeout);
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stopping.Token);
             try {
-                await _sendLock.WaitAsync(timeout.Token);
+                await _sendLock.WaitAsync(cancellation.Token);
                 try {
                     if (IsOpen) {
-                        await WebSocket.SendAsync(data, WebSocketMessageType.Text, true, timeout.Token);
+                        cancellation.CancelAfter(writeTimeout);
+                        try {
+                            await WebSocket.SendAsync(data, WebSocketMessageType.Text, true, cancellation.Token);
+                        } catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested && !_stopping.IsCancellationRequested) {
+                            WebSocket.Abort();
+                            throw new TimeoutException("WebSocket send timed out", error);
+                        }
                     }
                 } finally {
                     _sendLock.Release();
                 }
             } catch (OperationCanceledException) when (_stopping.IsCancellationRequested && !cancellationToken.IsCancellationRequested) {
                 // Shutdown cancels stale broadcasts without reporting an application error.
-            } catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested) {
-                WebSocket.Abort();
-                throw new TimeoutException("WebSocket send timed out", error);
             }
         } finally {
             EndOperation();

@@ -1084,6 +1084,22 @@ describe("DarkWs", () => {
     client.dispose();
   });
 
+  it("keeps a socket whose pong is late while other frames keep arriving", async () => {
+    const client = createClient({ pingInterval: 100, pongTimeout: 50 }).connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    for (let ping = 0; ping < 3; ping++) {
+      await vi.advanceTimersByTimeAsync(ping === 0 ? 100 : 60);
+      expect(socket.sent.filter((data) => data === "ping")).toHaveLength(ping + 1);
+      await vi.advanceTimersByTimeAsync(40);
+      socket.serverText(JSON.stringify({ id: "@", action: "sync", data: ping }));
+    }
+    await vi.advanceTimersByTimeAsync(40);
+    expect(socket.readyState).toBe(MockWebSocket.OPEN);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    client.dispose();
+  });
+
   it("drops a socket whose pong does not arrive and reconnects", async () => {
     const client = createClient({ pingInterval: 100, pongTimeout: 50 }).connect();
     const socket = MockWebSocket.instances[0];

@@ -84,19 +84,27 @@ internal sealed class Broadcaster(
 
     private async ValueTask SendAllAsync(IReadOnlyCollection<IWebSocketConnection> connections, byte[] bytes, CancellationToken cancellationToken) {
         // Sends are asynchronous I/O: start every recipient at once so slow sockets cannot delay the rest.
-        // They all start now, so one shared deadline equals a per-recipient timeout without a timer per recipient.
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(_options.BroadcastSendTimeout);
-        await Task.WhenAll(connections.Select(connection => SendAsync(connection, bytes, timeout.Token, cancellationToken)));
+        await Task.WhenAll(connections.Select(connection => SendAsync(connection, bytes, cancellationToken)));
     }
 
-    private async Task SendAsync(IWebSocketConnection connection, byte[] bytes, CancellationToken timeout, CancellationToken cancellationToken) {
+    private async Task SendAsync(IWebSocketConnection connection, byte[] bytes, CancellationToken cancellationToken) {
         if (!connection.IsOpen) {
             return;
         }
 
         try {
-            await connection.SendAsync(bytes, timeout);
+            if (connection is WebSocketConnection owned) {
+                // The deadline starts once the connection's send lock is acquired, so messages queued behind others on a busy
+                // socket are not counted as a stall. A timed-out write aborts the connection itself; queued writes then return.
+                await owned.SendAsync(bytes, _options.BroadcastSendTimeout, cancellationToken);
+            } else {
+                // A custom connection serializes its own writes, so only the whole call can be bounded.
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(_options.BroadcastSendTimeout);
+                await connection.SendAsync(bytes, timeout.Token);
+            }
+        } catch (TimeoutException) when (connection is WebSocketConnection) {
+            logger.LogWarning("Broadcast to {ConnectionId} timed out; connection aborted", connection.Id);
         } catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) {
             logger.LogWarning("Broadcast to {ConnectionId} timed out; aborting connection", connection.Id);
             try {
