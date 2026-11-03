@@ -38,6 +38,7 @@ builder.Services.Configure<DarkWsOptions>(builder.Configuration.GetSection("Dark
 | `ReceiveIdleTimeout` | 2 min | Дедлайн ожидающего чтения (.NET 8) |
 | `SendTimeout` | 30 s | Дедлайн записи в сокет после захвата блокировки отправки |
 | `BroadcastSendTimeout` | 10 s | Дедлайн записи рассылки для каждого получателя после захвата блокировки отправки |
+| `EnableCompression` | `false` | Согласовывать permessage-deflate, каждое сообщение сжимается отдельно |
 | `ShutdownTimeout` | 10 s | Обработчики, хуки закрытия и close handshake при остановке |
 | `AllowedOrigins` | пусто (любые) | Браузерные origin, которым разрешено открывать эндпоинт |
 | `AuthenticationQueryParameter` | `token` | Параметр запроса, передаваемый аутентификатору при upgrade |

@@ -37,6 +37,7 @@ they use, so changing options at runtime does not reconfigure existing connectio
 | `ReceiveIdleTimeout` | 2 min | Pending read deadline (.NET 8) |
 | `SendTimeout` | 30 s | Socket write deadline, after the send lock is acquired |
 | `BroadcastSendTimeout` | 10 s | Per-recipient broadcast write deadline, after the send lock is acquired |
+| `EnableCompression` | `false` | Negotiate permessage-deflate, each message compressed on its own |
 | `ShutdownTimeout` | 10 s | Handlers, close hooks, and close handshake on shutdown |
 | `AllowedOrigins` | empty (any) | Browser origins allowed to open the endpoint |
 | `AuthenticationQueryParameter` | `token` | Query parameter passed to the authenticator on upgrade |

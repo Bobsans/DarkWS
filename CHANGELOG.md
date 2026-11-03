@@ -6,6 +6,18 @@ include migration guidance before a release is published.
 
 ## [Unreleased]
 
+## [5.1.3] - 2026-11-03
+
+### Added
+
+- `DarkWsOptions.EnableCompression` negotiates permessage-deflate with clients that
+  offer it, browsers included, without server context takeover: each message is
+  compressed on its own. Large JSON messages, such as boot syncs, shrink several
+  times, so a slow link drains them before the write and keep-alive deadlines.
+  Off by default: compression costs CPU and memory per connection, and should stay
+  off when one message mixes secrets with text an attacker controls. Clients that do
+  not offer the extension are served uncompressed as before.
+
 ## [5.1.2] - 2026-11-02
 
 ### Fixed

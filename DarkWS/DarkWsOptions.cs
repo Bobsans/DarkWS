@@ -40,6 +40,9 @@ public sealed class DarkWsOptions {
     /// <summary>Per-recipient broadcast write deadline after the connection's send lock is acquired; time spent queued behind other messages of the same connection is not counted. Default 10 seconds; expiration aborts that recipient.</summary>
     public TimeSpan BroadcastSendTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
+    /// <summary>Negotiates permessage-deflate with clients that offer it, without server context takeover, so each message is compressed on its own. Default false. Costs CPU and memory per connection; do not enable when one message mixes secrets with attacker-controlled text.</summary>
+    public bool EnableCompression { get; set; }
+
     /// <summary>Shared deadline for cancellation, close hooks, and handshake. Default 10 seconds; uncooperative tasks retain resources until completion.</summary>
     public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(10);
 

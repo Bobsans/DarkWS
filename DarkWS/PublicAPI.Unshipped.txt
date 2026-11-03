@@ -1,4 +1,6 @@
 #nullable enable
 DarkWS.DarkWsActionInfo.HasAttribute<T>() -> bool
+DarkWS.DarkWsOptions.EnableCompression.get -> bool
+DarkWS.DarkWsOptions.EnableCompression.set -> void
 DarkWS.HandlerBase.SessionOrDefault.get -> DarkWS.Abstractions.IDarkWsSession?
 DarkWS.HandlerBase<TSession>.SessionOrDefault.get -> TSession?

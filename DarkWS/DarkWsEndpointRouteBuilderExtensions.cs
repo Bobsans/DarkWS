@@ -62,6 +62,9 @@ public static class DarkWsEndpointRouteBuilderExtensions {
 
             var socket = await context.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext {
                 KeepAliveInterval = options.KeepAliveInterval,
+                DangerousEnableCompression = options.EnableCompression,
+                // Compressing every message on its own keeps one message's bytes out of the next one's dictionary.
+                DisableServerContextTakeover = true,
 #if NET9_0_OR_GREATER
                 KeepAliveTimeout = options.KeepAliveTimeout
 #endif
